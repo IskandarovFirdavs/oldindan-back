@@ -1,0 +1,131 @@
+@baseUrl = http://127.0.0.1:8000/api/accounts
+
+### =========================
+### SUPERUSER LOGIN
+### =========================
+POST {{baseUrl}}/consumer/login/
+Content-Type: application/json
+
+{
+  "phone": "admin",
+  "password": "admin"
+}
+
+### =========================
+### CONSUMER REGISTER OTP
+### =========================
+POST {{baseUrl}}/consumer/request-register-otp/
+Content-Type: application/json
+
+{
+  "phone": "998901234567"
+}
+
+### =========================
+### CONSUMER REGISTER
+### =========================
+POST {{baseUrl}}/consumer/register/
+Content-Type: application/json
+
+{
+  "phone": "998901234567",
+  "code": "123456",
+  "first_name": "Firdavs",
+  "last_name": "Iskandarov",
+  "password": "12345678",
+  "password_repeat": "12345678"
+}
+
+### =========================
+### CONSUMER LOGIN
+### =========================
+POST {{baseUrl}}/consumer/login/
+Content-Type: application/json
+
+{
+  "phone": "998901234567",
+  "password": "12345678"
+}
+
+### =========================
+### GET PROFILE
+### =========================
+GET {{baseUrl}}/me/
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzc1MzM5MDcwLCJpYXQiOjE3NzUzMzg3NzAsImp0aSI6ImJiMDhmMTQwYjY2NjQxZGY4ZTNmNzhmNmFlZTY3YWY1IiwidXNlcl9pZCI6IjIifQ.1n3KByenvq_DpEFkEhlgIcRSRGO0H9RY1aVawahxp58
+
+### =========================
+### UPDATE PROFILE
+### =========================
+PATCH {{baseUrl}}/me/
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzc1MzM5MDcwLCJpYXQiOjE3NzUzMzg3NzAsImp0aSI6ImJiMDhmMTQwYjY2NjQxZGY4ZTNmNzhmNmFlZTY3YWY1IiwidXNlcl9pZCI6IjIifQ.1n3KByenvq_DpEFkEhlgIcRSRGO0H9RY1aVawahxp58
+Content-Type: application/json
+
+{
+  "first_name": "Firdavs Updated",
+  "bio": "Backend dev 🚀",
+  "email": "test@mail.com"
+}
+
+### =========================
+### FORGOT PASSWORD REQUEST
+### =========================
+POST {{baseUrl}}/consumer/forgot-password/request/
+Content-Type: application/json
+
+{
+  "phone": "998901234567"
+}
+
+### =========================
+### FORGOT PASSWORD CONFIRM
+### =========================
+POST {{baseUrl}}/consumer/forgot-password/confirm/
+Content-Type: application/json
+
+{
+  "phone": "998901234567",
+  "code": "370278",
+  "new_password": "87654321",
+  "new_password_repeat": "87654321"
+}
+
+
+### =========================
+### CREATE OWNER (SUPERADMIN ONLY)
+### =========================
+POST {{baseUrl}}/partner/create-owner/
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzc1MzM5NDMzLCJpYXQiOjE3NzUzMzkxMzMsImp0aSI6IjgxOGZlNzVkNDVjYjQzOTFhYzNkNjc3ZWI2M2Y5YTI4IiwidXNlcl9pZCI6IjEifQ.NNpwCwkDTd_7KOq-YNTKrSdiwF8r5pKVl9mr3fdh_vo
+Content-Type: application/json
+
+{
+  "email": "newowner@example.com",
+  "password": "12345678"
+}
+
+
+
+### =========================
+### CREATE MANAGER (OWNER ONLY)
+### =========================
+POST {{baseUrl}}/partner/create-manager/
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzc1MzM5NTY1LCJpYXQiOjE3NzUzMzkyNjUsImp0aSI6IjM4MmYzMjQ4MjU4MzRmMjhhNDZkZGIzMTczOWY2YjZjIiwidXNlcl9pZCI6IjMifQ.VbTcundYL9CE1gYj3ZSeM56GjS0P5CPe3erKhdHRP9o
+Content-Type: application/json
+
+{
+  "email": "manager@example.com",
+  "password": "12345678"
+}
+
+
+### =========================
+### PARTNER LOGIN (OWNER / MANAGER)
+### =========================
+POST {{baseUrl}}/partner/login/
+Content-Type: application/json
+
+{
+  "email": "manager@example.com",
+  "password": "12345678"
+}
+
+

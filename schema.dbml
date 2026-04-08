@@ -1,0 +1,187 @@
+Table users as U {
+  id int [pk, increment]
+  phone varchar [unique, note: 'Consumer login uchun']
+  email varchar [unique, null, note: 'Owner/Manager uchun yoki consumer optional']
+  first_name varchar
+  last_name varchar
+  password varchar [not null]
+  role varchar [not null, check: `role in ('consumer', 'owner', 'manager', 'receptionist', 'superadmin')`]
+  bio varchar
+  avatar varchar
+  is_active boolean [default: true]
+  is_phone_verified boolean [default: false]
+  created_at datetime [default: `now()`]
+  updated_at datetime [default: `now()`]
+}
+
+Table telegram_otps {
+  id int [pk, increment]
+  phone varchar [not null]
+  code varchar [not null, note: '6 xonali kod']
+  purpose varchar [not null, check: `purpose in ('register', 'reset_password')`]
+  is_used boolean [default: false]
+  expires_at datetime [not null]
+  created_at datetime [default: `now()`]
+}
+
+Table restaurant_brands {
+  id int [pk, increment]
+  name varchar [not null]
+  slug varchar [unique]
+  logo varchar
+  description varchar
+  owner_id int [ref: > U.id, not null]
+  created_at datetime [default: `now()`]
+}
+
+Table branches {
+  id int [pk, increment]
+  brand_id int [ref: > restaurant_brands.id, not null]
+  name varchar [not null]
+  slug varchar
+  address varchar [not null]
+  latitude decimal
+  longitude decimal
+  phone varchar
+  is_active boolean [default: true]
+  service_fee int [default: 5000]
+  deposit_enabled boolean [default: false]
+  deposit_amount int [default: 0]
+  working_hours_json varchar [note: 'JSON string']
+  created_at datetime [default: `now()`]
+  updated_at datetime [default: `now()`]
+}
+
+Table branch_images {
+  id int [pk, increment]
+  branch_id int [ref: > branches.id, not null]
+  image varchar [not null]
+  sort_order int [default: 0]
+}
+
+Table branch_staff {
+  id int [pk, increment]
+  branch_id int [ref: > branches.id, not null]
+  user_id int [ref: > U.id, not null]
+  role varchar [not null, check: `role in ('owner', 'manager', 'receptionist')`]
+  is_active boolean [default: true]
+  created_at datetime [default: `now()`]
+
+  Indexes {
+    (branch_id, user_id) [unique]
+  }
+}
+
+Table floors {
+  id int [pk, increment]
+  branch_id int [ref: > branches.id, not null]
+  name varchar [not null, note: 'Main Hall, Terrace, 2nd Floor']
+  sort_order int [default: 0]
+  is_active boolean [default: true]
+}
+
+Table zones {
+  id int [pk, increment]
+  floor_id int [ref: > floors.id, not null]
+  name varchar [not null, note: 'Indoor, Outdoor, VIP']
+  color varchar
+  sort_order int [default: 0]
+  is_active boolean [default: true]
+}
+
+Table layout_items {
+  id int [pk, increment]
+  floor_id int [ref: > floors.id, not null]
+  zone_id int [ref: > zones.id, null]
+  type varchar [not null, check: `type in ('table', 'entrance', 'exit', 'wc', 'cashier', 'kids_area', 'wall', 'decor')`]
+  name varchar
+  x int [not null]
+  y int [not null]
+  width int [not null]
+  height int [not null]
+  rotation int [default: 0]
+  shape varchar [check: `shape in ('round', 'rect', 'icon')`]
+  meta_json varchar [note: 'extra JSON data']
+  is_active boolean [default: true]
+}
+
+Table tables {
+  id int [pk, increment]
+  branch_id int [ref: > branches.id, not null]
+  floor_id int [ref: > floors.id, not null]
+  zone_id int [ref: > zones.id, null]
+  layout_item_id int [ref: > layout_items.id, not null, unique]
+  name varchar [not null]
+  seats int [check: `seats > 0`]
+  is_active boolean [default: true]
+  created_at datetime [default: `now()`]
+}
+
+Table bookings {
+  id int [pk, increment]
+  user_id int [ref: > U.id, not null]
+  branch_id int [ref: > branches.id, not null]
+  floor_id int [ref: > floors.id, not null]
+  zone_id int [ref: > zones.id, null]
+  table_id int [ref: > tables.id, not null]
+  guest_count int [not null, check: `guest_count > 0`]
+  children_count int [default: 0]
+  booking_start datetime [not null]
+  booking_end datetime [not null]
+  status varchar [not null, check: `status in ('pending', 'confirmed', 'checked_in', 'completed', 'canceled', 'no_show')`]
+  special_request varchar
+  source varchar [default: 'app', check: `source in ('app', 'partner_manual')`]
+  created_at datetime [default: `now()`]
+  updated_at datetime [default: `now()`]
+
+  Checks {
+  `booking_start < booking_end`
+  }
+
+  Indexes {
+    (table_id, booking_start)
+    (branch_id, booking_start)
+    (user_id, booking_start)
+  }
+}
+
+Table booking_status_logs {
+  id int [pk, increment]
+  booking_id int [ref: > bookings.id, not null]
+  changed_by_id int [ref: > U.id, not null]
+  old_status varchar
+  new_status varchar [not null]
+  note varchar
+  created_at datetime [default: `now()`]
+}
+
+Table notifications {
+  id int [pk, increment]
+  user_id int [ref: > U.id, not null]
+  type varchar [not null, check: `type in ('booking_created', 'booking_confirmed', 'booking_canceled', 'booking_reminder', 'otp')`]
+  title varchar [not null]
+  body varchar [not null]
+  is_read boolean [default: false]
+  created_at datetime [default: `now()`]
+}
+
+Table telegram_message_logs {
+  id int [pk, increment]
+  user_id int [ref: > U.id, null]
+  phone varchar
+  message varchar [not null]
+  status varchar [not null, check: `status in ('pending', 'sent', 'failed')`]
+  purpose varchar [note: 'otp yoki booking xabari']
+  created_at datetime [default: `now()`]
+}
+
+Table user_favorites {
+  id int [pk, increment]
+  user_id int [ref: > U.id, not null]
+  branch_id int [ref: > branches.id, not null]
+  created_at datetime [default: `now()`]
+
+  Indexes {
+    (user_id, branch_id) [unique]
+  }
+}

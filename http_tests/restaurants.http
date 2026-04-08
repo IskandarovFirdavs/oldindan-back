@@ -1,0 +1,66 @@
+@baseUrl = http://127.0.0.1:8000/api/restaurants
+@ownerToken = YOUR_OWNER_ACCESS_TOKEN
+@superToken = YOUR_SUPERADMIN_ACCESS_TOKEN
+
+### Public branches list
+GET {{baseUrl}}/branches/
+
+### Public branch detail
+GET {{baseUrl}}/branches/1/
+
+### Partner brand list
+GET {{baseUrl}}/partner/brands/
+Authorization: Bearer {{ownerToken}}
+
+### Partner create brand
+POST {{baseUrl}}/partner/brands/create/
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "name": "OLDINDAN Bistro",
+  "slug": "oldindan-bistro",
+  "description": "Main restaurant brand"
+}
+
+### Partner branch list
+GET {{baseUrl}}/partner/branches/
+Authorization: Bearer {{ownerToken}}
+
+### Partner create branch
+POST {{baseUrl}}/partner/branches/create/
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "brand": 1,
+  "name": "OLDINDAN Chilonzor",
+  "slug": "oldindan-chilonzor",
+  "address": "Chilonzor, Tashkent",
+  "latitude": 41.275,
+  "longitude": 69.203,
+  "phone": "998901112233",
+  "is_active": true,
+  "service_fee": 5000,
+  "deposit_enabled": false,
+  "deposit_amount": 0,
+  "working_hours": {
+    "mon": ["09:00", "23:00"],
+    "tue": ["09:00", "23:00"]
+  }
+}
+
+### Partner branch detail
+GET {{baseUrl}}/partner/branches/1/
+Authorization: Bearer {{ownerToken}}
+
+### Partner branch update
+PATCH {{baseUrl}}/partner/branches/1/
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "service_fee": 7000,
+  "deposit_enabled": true,
+  "deposit_amount": 30000
+}

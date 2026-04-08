@@ -1,0 +1,52 @@
+@baseUrl = http://127.0.0.1:8000/api/tables
+@ownerToken = YOUR_OWNER_ACCESS_TOKEN
+@managerToken = YOUR_MANAGER_ACCESS_TOKEN
+
+### Public tables list
+GET {{baseUrl}}/branches/1/tables/?floor_id=1&zone_id=1
+
+### Partner list tables
+GET {{baseUrl}}/partner/tables/?branch_id=1&floor_id=1
+Authorization: Bearer {{ownerToken}}
+
+### Partner create table
+POST {{baseUrl}}/partner/tables/create/
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "branch": 1,
+  "floor": 1,
+  "zone": 1,
+  "layout_item": 3,
+  "name": "T1",
+  "seats": 4,
+  "is_active": true
+}
+
+### Partner get table detail
+GET {{baseUrl}}/partner/tables/1/
+Authorization: Bearer {{ownerToken}}
+
+### Partner update table
+PATCH {{baseUrl}}/partner/tables/1/
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "name": "T1-Updated",
+  "seats": 6
+}
+
+### Partner deactivate table
+PATCH {{baseUrl}}/partner/tables/1/
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "is_active": false
+}
+
+### Partner delete table
+DELETE {{baseUrl}}/partner/tables/1/
+Authorization: Bearer {{ownerToken}}

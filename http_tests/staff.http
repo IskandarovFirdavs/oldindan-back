@@ -1,0 +1,91 @@
+@baseUrl = http://127.0.0.1:8000/api/layouts
+@ownerToken = YOUR_OWNER_ACCESS_TOKEN
+@managerToken = YOUR_MANAGER_ACCESS_TOKEN
+
+### Public floors
+GET {{baseUrl}}/branches/1/floors/
+
+### Public layout items
+GET {{baseUrl}}/branches/1/layout-items/?floor_id=1
+
+### Partner floor list
+GET {{baseUrl}}/partner/floors/
+Authorization: Bearer {{ownerToken}}
+
+### Partner create floor
+POST {{baseUrl}}/partner/floors/create/
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "branch": 1,
+  "name": "Main Hall",
+  "sort_order": 1,
+  "is_active": true
+}
+
+### Partner create zone
+POST {{baseUrl}}/partner/zones/create/
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "floor": 1,
+  "name": "Indoor",
+  "color": "#D7263D",
+  "sort_order": 1,
+  "is_active": true
+}
+
+### Partner create layout item
+POST {{baseUrl}}/partner/layout-items/create/
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "floor": 1,
+  "zone": 1,
+  "type": "table",
+  "name": "T1-Layout",
+  "x": 120,
+  "y": 180,
+  "width": 90,
+  "height": 90,
+  "rotation": 0,
+  "shape": "round",
+  "z_index": 1,
+  "meta": {
+    "label": "Window side"
+  },
+  "is_active": true
+}
+
+### Partner list layout items
+GET {{baseUrl}}/partner/layout-items/?branch_id=1&floor_id=1
+Authorization: Bearer {{ownerToken}}
+
+### Partner update layout item
+PATCH {{baseUrl}}/partner/layout-items/1/
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "x": 240,
+  "y": 220,
+  "width": 100,
+  "height": 100
+}
+
+### Partner update floor
+PATCH {{baseUrl}}/partner/floors/1/
+Authorization: Bearer {{ownerToken}}
+Content-Type: application/json
+
+{
+  "name": "Terrace",
+  "sort_order": 2
+}
+
+### Partner delete zone
+DELETE {{baseUrl}}/partner/zones/1/
+Authorization: Bearer {{ownerToken}}

@@ -16,9 +16,16 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 
+    'drf_yasg',
     "rest_framework",
     "rest_framework_simplejwt",
+    
     "accounts",
+    "restaurants",
+    "staff",
+    "layouts",
+    "tables",
+    "bookings",
 ]
 
 MIDDLEWARE = [

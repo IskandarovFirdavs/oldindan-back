@@ -30,12 +30,19 @@ class PublicBranchFloorListView(generics.ListAPIView):
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
-        branch_id = self.kwargs["branch_id"]
-        return Floor.objects.filter(
-            branch_id=branch_id,
-            is_active=True,
-            branch__is_active=True
-        ).prefetch_related("zones")
+        if getattr(self, "swagger_fake_view", False):
+            return Floor.objects.none()
+
+        user = self.request.user
+        if not user.is_authenticated:
+            return Floor.objects.none()
+
+        qs = Floor.objects.select_related("branch")
+
+        if user.role == User.Role.SUPERADMIN:
+            return qs
+
+        return qs.filter(branch__brand__owner=user)
 
 
 class PublicBranchLayoutItemsView(generics.ListAPIView):
@@ -43,20 +50,19 @@ class PublicBranchLayoutItemsView(generics.ListAPIView):
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
-        branch_id = self.kwargs["branch_id"]
-        floor_id = self.request.query_params.get("floor_id")
+        if getattr(self, "swagger_fake_view", False):
+            return Floor.objects.none()
 
-        qs = LayoutItem.objects.filter(
-            floor__branch_id=branch_id,
-            is_active=True,
-            floor__is_active=True,
-            floor__branch__is_active=True
-        ).select_related("floor", "zone")
+        user = self.request.user
+        if not user.is_authenticated:
+            return Floor.objects.none()
 
-        if floor_id:
-            qs = qs.filter(floor_id=floor_id)
+        qs = Floor.objects.select_related("branch")
 
-        return qs
+        if user.role == User.Role.SUPERADMIN:
+            return qs
+
+        return qs.filter(branch__brand__owner=user)
 
 
 # =========================
@@ -68,18 +74,19 @@ class PartnerFloorListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated, IsPartnerLayoutViewer]
 
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Floor.objects.none()
+
         user = self.request.user
-        qs = Floor.objects.select_related("branch__brand").prefetch_related("zones")
+        if not user.is_authenticated:
+            return Floor.objects.none()
+
+        qs = Floor.objects.select_related("branch")
 
         if user.role == User.Role.SUPERADMIN:
             return qs
 
-        owner_qs = qs.filter(branch__brand__owner=user)
-        staff_qs = qs.filter(
-            branch__staff_memberships__user=user,
-            branch__staff_memberships__is_active=True,
-        )
-        return (owner_qs | staff_qs).distinct()
+        return qs.filter(branch__brand__owner=user)
 
 
 class PartnerFloorCreateView(generics.CreateAPIView):
@@ -91,6 +98,9 @@ class PartnerFloorDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [permissions.IsAuthenticated, IsOwnerManagerOrSuperAdmin]
 
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Floor.objects.none()
+
         user = self.request.user
         qs = Floor.objects.select_related("branch__brand")
 
@@ -124,6 +134,9 @@ class PartnerZoneDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [permissions.IsAuthenticated, IsOwnerManagerOrSuperAdmin]
 
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Zone.objects.none()
+
         user = self.request.user
         qs = Zone.objects.select_related("floor__branch__brand")
 
@@ -151,6 +164,9 @@ class PartnerLayoutItemListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated, IsPartnerLayoutViewer]
 
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return LayoutItem.objects.none()
+
         user = self.request.user
         branch_id = self.request.query_params.get("branch_id")
         floor_id = self.request.query_params.get("floor_id")
@@ -184,6 +200,9 @@ class PartnerLayoutItemDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [permissions.IsAuthenticated, IsOwnerManagerOrSuperAdmin]
 
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return LayoutItem.objects.none()
+
         user = self.request.user
         qs = LayoutItem.objects.select_related("floor__branch__brand", "zone")
 

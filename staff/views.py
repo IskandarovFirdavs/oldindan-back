@@ -32,21 +32,22 @@ class PartnerStaffCreateView(generics.CreateAPIView):
 
 class PartnerStaffDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = BranchStaffListSerializer
-    permission_classes = [permissions.IsAuthenticated, IsOwnerOrSuperAdmin]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return BranchStaff.objects.none()
+
         user = self.request.user
-        qs = BranchStaff.objects.select_related("branch__brand", "user")
+        if not user.is_authenticated:
+            return BranchStaff.objects.none()
+
+        qs = BranchStaff.objects.select_related("branch")
 
         if user.role == User.Role.SUPERADMIN:
             return qs
 
         return qs.filter(branch__brand__owner=user)
-
-    def get_serializer_class(self):
-        if self.request.method in ["PUT", "PATCH"]:
-            return BranchStaffUpdateSerializer
-        return BranchStaffListSerializer
 
 
 class MyStaffMembershipListView(generics.ListAPIView):

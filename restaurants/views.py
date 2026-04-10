@@ -73,16 +73,19 @@ class PartnerBranchDetailView(generics.RetrieveUpdateAPIView):
     permission_classes = [permissions.IsAuthenticated, IsOwnerOrSuperAdmin]
 
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Branch.objects.none()
+
         user = self.request.user
+        if not user.is_authenticated:
+            return Branch.objects.none()
+
         qs = Branch.objects.select_related("brand").prefetch_related("images")
+
         if user.role == "superadmin":
             return qs
-        return qs.filter(brand__owner=user)
 
-    def get_serializer_class(self):
-        if self.request.method in ["PUT", "PATCH"]:
-            return BranchCreateUpdateSerializer
-        return BranchDetailSerializer
+        return qs.filter(brand__owner=user)
 
 
 class PartnerBranchImageCreateView(generics.CreateAPIView):

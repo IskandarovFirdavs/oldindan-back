@@ -21,6 +21,10 @@ class PublicBranchTableListView(generics.ListAPIView):
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Table.objects.none()
+        
+    
         branch_id = self.kwargs["branch_id"]
         floor_id = self.request.query_params.get("floor_id")
         zone_id = self.request.query_params.get("zone_id")
@@ -48,8 +52,11 @@ class PublicBranchTableListView(generics.ListAPIView):
 class PartnerTableListView(generics.ListAPIView):
     serializer_class = TableSerializer
     permission_classes = [permissions.IsAuthenticated, IsPartnerTableViewer]
-
+    
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Table.objects.none()
+
         user = self.request.user
         branch_id = self.request.query_params.get("branch_id")
         floor_id = self.request.query_params.get("floor_id")
@@ -93,6 +100,9 @@ class PartnerTableDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [permissions.IsAuthenticated, IsOwnerManagerOrSuperAdmin]
 
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Table.objects.none()
+
         user = self.request.user
         qs = Table.objects.select_related(
             "branch__brand",

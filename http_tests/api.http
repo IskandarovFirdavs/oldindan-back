@@ -18,7 +18,7 @@ POST {{baseUrl}}/consumer/request-register-otp/
 Content-Type: application/json
 
 {
-  "phone": "998901234567"
+  "phone": "998940195646"
 }
 
 ### =========================
@@ -28,8 +28,8 @@ POST {{baseUrl}}/consumer/register/
 Content-Type: application/json
 
 {
-  "phone": "998901234567",
-  "code": "123456",
+  "phone": "998940195646",
+  "code": "823324",
   "first_name": "Firdavs",
   "last_name": "Iskandarov",
   "password": "12345678",

@@ -125,3 +125,8 @@ AUTHENTICATION_BACKENDS = [
 
 AUTH_USER_MODEL = 'accounts.User'
 
+
+# ESKIZ_SMS_EMAIL = env("ESKIZ_SMS_EMAIL", default="")
+# ESKIZ_SMS_PASSWORD = env("ESKIZ_SMS_PASSWORD", default="")
+# ESKIZ_SMS_FROM = env("ESKIZ_SMS_FROM", default="4546")
+# Hozircha real SMS ulanmagan, print() ishlaydi.

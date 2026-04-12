@@ -1,7 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from django.utils import timezone
-
+from datetime import timedelta
 
 class UserManager(BaseUserManager):
     def create_user(self, phone=None, email=None, password=None, **extra_fields):
@@ -71,21 +71,36 @@ class User(AbstractBaseUser, PermissionsMixin):
         return self.phone or self.email or f"User {self.pk}"
 
 
+
 class TelegramOTP(models.Model):
     class Purpose(models.TextChoices):
         REGISTER = "register", "Register"
         RESET_PASSWORD = "reset_password", "Reset password"
 
-    phone = models.CharField(max_length=20)
+    phone = models.CharField(max_length=20, db_index=True)
     code = models.CharField(max_length=6)
     purpose = models.CharField(max_length=30, choices=Purpose.choices)
     is_used = models.BooleanField(default=False)
-    expires_at = models.DateTimeField()
 
+    attempt_count = models.PositiveIntegerField(default=0)
+    max_attempts = models.PositiveIntegerField(default=5)
+
+    expires_at = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
 
     def is_expired(self):
         return timezone.now() > self.expires_at
+
+    def is_blocked(self):
+        return self.attempt_count >= self.max_attempts
+
+    @classmethod
+    def ttl_minutes(cls):
+        return 5
+
+    @classmethod
+    def default_expiry(cls):
+        return timezone.now() + timedelta(minutes=cls.ttl_minutes())
 
     def __str__(self):
         return f"{self.phone} - {self.purpose}"

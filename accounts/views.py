@@ -34,8 +34,7 @@ class ConsumerRequestRegisterOTPView(APIView):
         serializer = ConsumerRequestRegisterOTPSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response({"detail": "Telegram kod yuborildi"}, status=status.HTTP_200_OK)
-
+        return Response({"detail": "SMS kod yuborildi"}, status=status.HTTP_200_OK)
 
 class ConsumerRegisterView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -64,8 +63,7 @@ class ForgotPasswordRequestView(APIView):
         serializer = ForgotPasswordRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response({"detail": "Reset kodi Telegramga yuborildi"}, status=status.HTTP_200_OK)
-
+        return Response({"detail": "SMS kod yuborildi"}, status=status.HTTP_200_OK)
 
 class ForgotPasswordConfirmView(APIView):
     permission_classes = [permissions.AllowAny]

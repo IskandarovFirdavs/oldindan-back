@@ -18,7 +18,7 @@ POST {{baseUrl}}/consumer/request-register-otp/
 Content-Type: application/json
 
 {
-  "phone": "998940195646"
+  "phone": "998940195648"
 }
 
 ### =========================
@@ -28,8 +28,8 @@ POST {{baseUrl}}/consumer/register/
 Content-Type: application/json
 
 {
-  "phone": "998940195646",
-  "code": "823324",
+  "phone": "998940195648",
+  "code": "854060",
   "first_name": "Firdavs",
   "last_name": "Iskandarov",
   "password": "12345678",
@@ -43,15 +43,15 @@ POST {{baseUrl}}/consumer/login/
 Content-Type: application/json
 
 {
-  "phone": "998901234567",
-  "password": "12345678"
+  "phone": "940195645 ",
+  "password": "lorem2009"
 }
 
 ### =========================
 ### GET PROFILE
 ### =========================
 GET {{baseUrl}}/me/
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzc1MzM5MDcwLCJpYXQiOjE3NzUzMzg3NzAsImp0aSI6ImJiMDhmMTQwYjY2NjQxZGY4ZTNmNzhmNmFlZTY3YWY1IiwidXNlcl9pZCI6IjIifQ.1n3KByenvq_DpEFkEhlgIcRSRGO0H9RY1aVawahxp58
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzc1OTg4MTcwLCJpYXQiOjE3NzU5ODc4NzAsImp0aSI6IjRmN2EzMmYyOGMwNDRkNTk5MWI3YWNlYTQ4MzEyMTUyIiwidXNlcl9pZCI6IjkifQ.ZSw0iUF090DZeZRUTJPABXQ3Zj6Nhr6wvBI1lDdYGec
 
 ### =========================
 ### UPDATE PROFILE
@@ -124,8 +124,8 @@ POST {{baseUrl}}/partner/login/
 Content-Type: application/json
 
 {
-  "email": "manager@example.com",
-  "password": "12345678"
+  "email": "kfc@gmail.com",
+  "password": "lorem2009"
 }
 
 

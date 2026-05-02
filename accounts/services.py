@@ -47,17 +47,3 @@ def verify_otp(phone, code, purpose):
     otp.save(update_fields=["is_used"])
     return otp
 
-
-def send_sms_code(phone, code, purpose):
-    message = f"OLDINDAN tasdiqlash kodi: {code}"
-
-    # HOZIRCHA:
-    print(f"[SMS PLACEHOLDER] phone={phone} purpose={purpose} code={code} message={message}")
-
-    # KEYIN ESKIZ ULANADI:
-    # 1. Eskiz cabinetdan API login/parol yoki token olasan
-    # 2. request yuborasan
-    # 3. status code va response ni log qilasan
-    # 4. exception bo'lsa retry/log qilasan
-
-    return True

@@ -3,17 +3,9 @@ from django.db import transaction
 from rest_framework import serializers
 from .models import User, TelegramOTP, UserCreationAudit
 from .utils import create_otp
-from .services import send_sms_code
-from accounts.services import verify_otp
+from accounts.services import create_otp, verify_otp
+from accounts.sms_service import send_sms_code
 
-
-from django.contrib.auth import authenticate
-from django.db import transaction
-from rest_framework import serializers
-from .models import User, TelegramOTP, UserCreationAudit
-from .utils import create_otp
-from .services import send_sms_code
-from accounts.services import verify_otp
 
 
 class UserSerializer(serializers.ModelSerializer):

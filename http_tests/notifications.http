@@ -1,0 +1,28 @@
+### Notification API Test
+
+@baseUrl = http://localhost:8000/api
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzc3NzU4NjYxLCJpYXQiOjE3Nzc3NTgzNjEsImp0aSI6IjAwNmI2MmE4MGY5YzQxZWI5ZDRmMDQwNzkxMDA2ZjI5IiwidXNlcl9pZCI6IjIifQ.oCsW8Swe-e97rBBDvi-dA2TzEcgmd9VbiPDs7go-clI
+
+### 1. Barcha notificationlarni ko'rish
+GET {{baseUrl}}/notifications/notifications/
+Authorization: Bearer {{token}}
+
+### 2. O'qilmaganlarni ko'rish
+GET {{baseUrl}}/notifications/notifications/?is_read=false
+Authorization: Bearer {{token}}
+
+### 3. Bitta notificationni o'qilgan qilish (PATCH)
+PATCH {{baseUrl}}/notifications/notifications/2/mark-read/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "is_read": true
+}
+
+### 4. Hammasini o'qilgan qilish
+POST {{baseUrl}}/notifications/notifications/mark-all-read/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{}

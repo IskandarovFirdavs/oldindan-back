@@ -6,7 +6,32 @@ SECRET_KEY = 'django-insecure-9t-hb25unq77!(7ftr!hu$@phklbwa156-px$6$nbd_0ge@w1*
 
 DEBUG = True
 
-ALLOWED_HOSTS = []
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+SECRET_KEY = 'django-insecure-9t-hb25unq77!(7ftr!hu$@phklbwa156-px$6$nbd_0ge@w1*'
+DEBUG = True
+
+ALLOWED_HOSTS = ["*", "*.ngrok-free.app`"]
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://cd94-87-192-224-196.ngrok-free.app",
+]
+
+CORS_ALLOW_CREDENTIALS = True
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://cd94-87-192-224-196.ngrok-free.app",
+]
+
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://.*\.ngrok-free\.app$",
+]
+
+
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -16,6 +41,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 
+    "corsheaders",
     'drf_yasg',
     "rest_framework",
     "rest_framework_simplejwt",
@@ -26,9 +52,11 @@ INSTALLED_APPS = [
     "layouts",
     "tables",
     "bookings",
+    "notifications",
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -51,6 +79,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
             ],
+            
         },
     },
 ]
@@ -91,9 +120,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'en'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Tashkent'
 
 USE_I18N = True
 
@@ -126,7 +155,7 @@ AUTHENTICATION_BACKENDS = [
 AUTH_USER_MODEL = 'accounts.User'
 
 
-# ESKIZ_SMS_EMAIL = env("ESKIZ_SMS_EMAIL", default="")
-# ESKIZ_SMS_PASSWORD = env("ESKIZ_SMS_PASSWORD", default="")
-# ESKIZ_SMS_FROM = env("ESKIZ_SMS_FROM", default="4546")
-# Hozircha real SMS ulanmagan, print() ishlaydi.
+ESKIZ_EMAIL = "iskandarovfirdavs09@gmail.com"
+ESKIZ_SECRET_KEY = ""
+ESKIZ_FROM = "4546"  # yoki cabinetdagi sender
+ESKIZ_TEST_MODE = True

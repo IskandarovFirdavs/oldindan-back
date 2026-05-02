@@ -1,7 +1,8 @@
 from django.db import transaction
 from django.utils import timezone
 from .models import Booking, BookingStatusLog
-
+from notifications.services import create_notification
+from notifications.models import Notification
 
 ACTIVE_BOOKING_STATUSES = ["pending", "confirmed", "checked_in"]
 
@@ -110,6 +111,26 @@ def create_booking(
         note="Booking created"
     )
 
+    # consumer notification
+    create_notification(
+        user=user,
+        type=Notification.Type.BOOKING_CREATED,
+        title="Bron yaratildi",
+        message=f"{branch.name} da bron yaratildi",
+        data={"booking_id": booking.id}
+    )
+
+    # owner notification
+    if hasattr(branch, 'brand') and branch.brand and branch.brand.owner:
+        owner = branch.brand.owner
+        create_notification(
+            user=owner,
+            type=Notification.Type.BOOKING_CREATED,
+            title="Yangi bron",
+            message=f"{branch.name} da yangi bron",
+            data={"booking_id": booking.id}
+        )
+
     return booking
 
 
@@ -128,6 +149,15 @@ def cancel_booking(*, booking, changed_by, note=""):
         new_status="canceled",
         changed_by=changed_by,
         note=note or "Booking canceled"
+    )
+
+    # notification
+    create_notification(
+        user=booking.user,
+        type=Notification.Type.BOOKING_CANCELED,
+        title="Bron bekor qilindi",
+        message="Sizning broningiz bekor qilindi",
+        data={"booking_id": booking.id}
     )
 
     return booking
@@ -150,6 +180,16 @@ def update_booking_status(*, booking, new_status, changed_by, note=""):
         changed_by=changed_by,
         note=note
     )
+
+    # notification when status changes to confirmed
+    if new_status == "confirmed":
+        create_notification(
+            user=booking.user,
+            type=Notification.Type.BOOKING_CONFIRMED,
+            title="Bron tasdiqlandi",
+            message="Sizning broningiz tasdiqlandi",
+            data={"booking_id": booking.id}
+        )
 
     return booking
 

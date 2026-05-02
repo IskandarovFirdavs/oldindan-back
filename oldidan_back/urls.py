@@ -32,5 +32,6 @@ urlpatterns = [
    path("api/layouts/", include("layouts.urls")),
    path("api/tables/", include("tables.urls")),
    path("api/bookings/", include("bookings.urls")),
+   path("api/notifications/", include("notifications.urls")),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 

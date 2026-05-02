@@ -1,5 +1,5 @@
 @baseUrl = http://127.0.0.1:8000/api/bookings
-@consumerToken = YOUR_CONSUMER_ACCESS_TOKEN
+@consumerToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzc3NzU3Nzk3LCJpYXQiOjE3Nzc3NTc0OTcsImp0aSI6IjAwOGYxMTQwNzRmNDRlNzA5ZGVmYWU0ZDA5YjdiZDliIiwidXNlcl9pZCI6IjYifQ.aUphZd2hxLVNl8IBP-lT9NLIaUbJctAlzy4X7Ev84FM
 @ownerToken = YOUR_OWNER_ACCESS_TOKEN
 @managerToken = YOUR_MANAGER_ACCESS_TOKEN
 @receptionToken = YOUR_RECEPTION_ACCESS_TOKEN
@@ -15,11 +15,11 @@ Content-Type: application/json
   "branch": 1,
   "floor": 1,
   "zone": 1,
-  "table": 1,
-  "guest_count": 4,
-  "children_count": 1,
-  "booking_start": "2026-04-10T18:00:00Z",
-  "booking_end": "2026-04-10T20:00:00Z",
+  "table": 2,
+  "guest_count": 2,
+  "children_count": 0,
+  "booking_start": "2026-05-3T18:00:00Z",
+  "booking_end": "2026-05-3T20:00:00Z",
   "special_request": "Window side"
 }
 

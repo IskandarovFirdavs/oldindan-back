@@ -71,7 +71,6 @@ class User(AbstractBaseUser, PermissionsMixin):
         return self.phone or self.email or f"User {self.pk}"
 
 
-
 class TelegramOTP(models.Model):
     class Purpose(models.TextChoices):
         REGISTER = "register", "Register"
@@ -80,6 +79,7 @@ class TelegramOTP(models.Model):
     phone = models.CharField(max_length=20, db_index=True)
     code = models.CharField(max_length=6)
     purpose = models.CharField(max_length=30, choices=Purpose.choices)
+
     is_used = models.BooleanField(default=False)
 
     attempt_count = models.PositiveIntegerField(default=0)
@@ -88,6 +88,9 @@ class TelegramOTP(models.Model):
     expires_at = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        ordering = ["-id"]
+
     def is_expired(self):
         return timezone.now() > self.expires_at
 
@@ -95,12 +98,8 @@ class TelegramOTP(models.Model):
         return self.attempt_count >= self.max_attempts
 
     @classmethod
-    def ttl_minutes(cls):
-        return 5
-
-    @classmethod
     def default_expiry(cls):
-        return timezone.now() + timedelta(minutes=cls.ttl_minutes())
+        return timezone.now() + timedelta(minutes=5)
 
     def __str__(self):
         return f"{self.phone} - {self.purpose}"

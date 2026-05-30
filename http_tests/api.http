@@ -1,5 +1,8 @@
 @baseUrl = http://127.0.0.1:8000/api/accounts
-
+@consumerToken = consumer_login_dan_olingan_token
+@ownerToken = owner_login_dan_olingan_token
+@managerToken = manager_login_dan_olingan_token
+@superadminToken = superadmin_login_dan_olingan_token
 ### =========================
 ### SUPERUSER LOGIN
 ### =========================
@@ -18,7 +21,7 @@ POST {{baseUrl}}/consumer/request-register-otp/
 Content-Type: application/json
 
 {
-  "phone": "998940195648"
+  "phone": "998940195649"
 }
 
 ### =========================
@@ -28,8 +31,8 @@ POST {{baseUrl}}/consumer/register/
 Content-Type: application/json
 
 {
-  "phone": "998940195648",
-  "code": "854060",
+  "phone": "998940195649",
+  "code": "458017",
   "first_name": "Firdavs",
   "last_name": "Iskandarov",
   "password": "12345678",
@@ -43,7 +46,7 @@ POST {{baseUrl}}/consumer/login/
 Content-Type: application/json
 
 {
-  "phone": "940195645 ",
+  "phone": "940195645",
   "password": "lorem2009"
 }
 
@@ -51,13 +54,13 @@ Content-Type: application/json
 ### GET PROFILE
 ### =========================
 GET {{baseUrl}}/me/
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzc1OTg4MTcwLCJpYXQiOjE3NzU5ODc4NzAsImp0aSI6IjRmN2EzMmYyOGMwNDRkNTk5MWI3YWNlYTQ4MzEyMTUyIiwidXNlcl9pZCI6IjkifQ.ZSw0iUF090DZeZRUTJPABXQ3Zj6Nhr6wvBI1lDdYGec
+Authorization: Bearer {{consumerToken}}
 
 ### =========================
 ### UPDATE PROFILE
 ### =========================
 PATCH {{baseUrl}}/me/
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzc1MzM5MDcwLCJpYXQiOjE3NzUzMzg3NzAsImp0aSI6ImJiMDhmMTQwYjY2NjQxZGY4ZTNmNzhmNmFlZTY3YWY1IiwidXNlcl9pZCI6IjIifQ.1n3KByenvq_DpEFkEhlgIcRSRGO0H9RY1aVawahxp58
+Authorization: Bearer {{consumerToken}}
 Content-Type: application/json
 
 {
@@ -89,12 +92,11 @@ Content-Type: application/json
   "new_password_repeat": "87654321"
 }
 
-
 ### =========================
 ### CREATE OWNER (SUPERADMIN ONLY)
 ### =========================
 POST {{baseUrl}}/partner/create-owner/
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzc1MzM5NDMzLCJpYXQiOjE3NzUzMzkxMzMsImp0aSI6IjgxOGZlNzVkNDVjYjQzOTFhYzNkNjc3ZWI2M2Y5YTI4IiwidXNlcl9pZCI6IjEifQ.NNpwCwkDTd_7KOq-YNTKrSdiwF8r5pKVl9mr3fdh_vo
+Authorization: Bearer {{superadminToken}}
 Content-Type: application/json
 
 {
@@ -102,23 +104,52 @@ Content-Type: application/json
   "password": "12345678"
 }
 
-
-
 ### =========================
-### CREATE MANAGER (OWNER ONLY)
+### CREATE STAFF (OWNER OR MANAGER)
 ### =========================
-POST {{baseUrl}}/partner/create-manager/
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzc1MzM5NTY1LCJpYXQiOjE3NzUzMzkyNjUsImp0aSI6IjM4MmYzMjQ4MjU4MzRmMjhhNDZkZGIzMTczOWY2YjZjIiwidXNlcl9pZCI6IjMifQ.VbTcundYL9CE1gYj3ZSeM56GjS0P5CPe3erKhdHRP9o
+# Owner -> manager, receptionist, waiter, waitress yarata oladi
+# Manager -> receptionist, waiter, waitress yarata oladi (manager yarata olmaydi)
+POST {{baseUrl}}/partner/create-staff/
+Authorization: Bearer {{ownerToken}}
 Content-Type: application/json
 
 {
-  "email": "manager@example.com",
-  "password": "12345678"
+  "email": "newmanager@example.com",
+  "password": "12345678",
+  "role": "manager",
+  "branch_id": 1
 }
 
+### =========================
+### CREATE STAFF (MANAGER YARATISHI - receptionist)
+### =========================
+POST {{baseUrl}}/partner/create-staff/
+Authorization: Bearer {{managerToken}}
+Content-Type: application/json
+
+{
+  "email": "newreceptionist@example.com",
+  "password": "12345678",
+  "role": "receptionist",
+  "branch_id": 1
+}
 
 ### =========================
-### PARTNER LOGIN (OWNER / MANAGER)
+### CREATE STAFF (MANAGER YARATISHI - waiter)
+### =========================
+POST {{baseUrl}}/partner/create-staff/
+Authorization: Bearer {{managerToken}}
+Content-Type: application/json
+
+{
+  "email": "newwaiter@example.com",
+  "password": "12345678",
+  "role": "waiter",
+  "branch_id": 1
+}
+
+### =========================
+### PARTNER LOGIN (OWNER / MANAGER / RECEPTIONIST / WAITER / WAITRESS)
 ### =========================
 POST {{baseUrl}}/partner/login/
 Content-Type: application/json
@@ -127,5 +158,3 @@ Content-Type: application/json
   "email": "kfc@gmail.com",
   "password": "lorem2009"
 }
-
-

@@ -7,23 +7,30 @@ from .serializers import (
     BranchStaffUpdateSerializer,
     MyStaffMembershipSerializer,
 )
-from .permissions import IsOwnerOrSuperAdmin
+from .permissions import IsManagerOrOwnerOrSuperAdmin, IsOwnerOrSuperAdmin
 
 
 class PartnerStaffListView(generics.ListAPIView):
     serializer_class = BranchStaffListSerializer
-    permission_classes = [permissions.IsAuthenticated, IsOwnerOrSuperAdmin]
+    permission_classes = [permissions.IsAuthenticated, IsManagerOrOwnerOrSuperAdmin]  # manager, owner, superadmin
 
     def get_queryset(self):
         user = self.request.user
-
         qs = BranchStaff.objects.select_related("branch__brand", "user")
 
         if user.role == User.Role.SUPERADMIN:
             return qs
 
-        return qs.filter(branch__brand__owner=user)
+        if user.role == User.Role.OWNER:
+            return qs.filter(branch__brand__owner=user)
 
+        # Manager – faqat o'z branchidagi staffni ko'radi
+        return qs.filter(
+            branch__staff_memberships__user=user,
+            branch__staff_memberships__role="manager",
+            branch__staff_memberships__is_active=True,
+        )
+    
 
 class PartnerStaffCreateView(generics.CreateAPIView):
     serializer_class = BranchStaffCreateSerializer
@@ -32,7 +39,7 @@ class PartnerStaffCreateView(generics.CreateAPIView):
 
 class PartnerStaffDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = BranchStaffListSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsManagerOrOwnerOrSuperAdmin]  # manager, owner, superadmin
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):

@@ -1,11 +1,10 @@
 from django.contrib.auth import authenticate
 from django.db import transaction
 from rest_framework import serializers
-from .models import User, TelegramOTP, UserCreationAudit
-from .utils import create_otp
-from accounts.services import create_otp, verify_otp
-from accounts.sms_service import send_sms_code
 
+from .models import User, TelegramOTP, UserCreationAudit
+from .services import create_otp, verify_otp
+from .sms_service import send_sms_code
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -26,12 +25,23 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "role", "is_phone_verified", "is_email_verified"]
 
 
+class TokenResponseSerializer(serializers.Serializer):
+    """Login/register javobini dokumentatsiya qilish uchun."""
+    refresh = serializers.CharField()
+    access = serializers.CharField()
+    user = UserSerializer()
+
+
+# ---------------------------------------------------------------------------
+# CONSUMER — OTP request
+# ---------------------------------------------------------------------------
+
 class ConsumerRequestRegisterOTPSerializer(serializers.Serializer):
     phone = serializers.CharField()
 
     def validate_phone(self, value):
         if User.objects.filter(phone=value).exists():
-            raise serializers.ValidationError("Bu telefon raqam allaqachon mavjud")
+            raise serializers.ValidationError("Bu telefon raqam allaqachon ro'yxatdan o'tgan.")
         return value
 
     def create(self, validated_data):
@@ -40,20 +50,24 @@ class ConsumerRequestRegisterOTPSerializer(serializers.Serializer):
         return otp
 
 
+# ---------------------------------------------------------------------------
+# CONSUMER — register
+# ---------------------------------------------------------------------------
+
 class ConsumerRegisterSerializer(serializers.Serializer):
     phone = serializers.CharField()
     code = serializers.CharField(max_length=6)
     first_name = serializers.CharField()
     last_name = serializers.CharField()
-    password = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, min_length=8)
     password_repeat = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
         if attrs["password"] != attrs["password_repeat"]:
-            raise serializers.ValidationError({"password_repeat": "Parollar mos emas"})
+            raise serializers.ValidationError({"password_repeat": "Parollar mos emas."})
 
         if User.objects.filter(phone=attrs["phone"]).exists():
-            raise serializers.ValidationError({"phone": "Bu telefon raqam allaqachon mavjud"})
+            raise serializers.ValidationError({"phone": "Bu telefon raqam allaqachon mavjud."})
 
         try:
             verify_otp(
@@ -70,8 +84,7 @@ class ConsumerRegisterSerializer(serializers.Serializer):
     def create(self, validated_data):
         validated_data.pop("password_repeat")
         validated_data.pop("code")
-
-        user = User.objects.create_user(
+        return User.objects.create_user(
             phone=validated_data["phone"],
             first_name=validated_data["first_name"],
             last_name=validated_data["last_name"],
@@ -79,8 +92,11 @@ class ConsumerRegisterSerializer(serializers.Serializer):
             role=User.Role.CONSUMER,
             is_phone_verified=True,
         )
-        return user
 
+
+# ---------------------------------------------------------------------------
+# CONSUMER — login (phone + password)
+# ---------------------------------------------------------------------------
 
 class LoginSerializer(serializers.Serializer):
     phone = serializers.CharField()
@@ -90,22 +106,26 @@ class LoginSerializer(serializers.Serializer):
         user = authenticate(
             request=self.context.get("request"),
             phone=attrs["phone"],
-            password=attrs["password"]
+            password=attrs["password"],
         )
         if not user:
-            raise serializers.ValidationError("Telefon yoki parol noto‘g‘ri")
+            raise serializers.ValidationError("Telefon yoki parol noto'g'ri.")
         if not user.is_active:
-            raise serializers.ValidationError("User faol emas")
+            raise serializers.ValidationError("Foydalanuvchi faol emas.")
         attrs["user"] = user
         return attrs
 
+
+# ---------------------------------------------------------------------------
+# CONSUMER — forgot password
+# ---------------------------------------------------------------------------
 
 class ForgotPasswordRequestSerializer(serializers.Serializer):
     phone = serializers.CharField()
 
     def validate_phone(self, value):
         if not User.objects.filter(phone=value, role=User.Role.CONSUMER).exists():
-            raise serializers.ValidationError("Consumer user topilmadi")
+            raise serializers.ValidationError("Bu raqamga tegishli foydalanuvchi topilmadi.")
         return value
 
     def create(self, validated_data):
@@ -117,25 +137,21 @@ class ForgotPasswordRequestSerializer(serializers.Serializer):
 class ForgotPasswordConfirmSerializer(serializers.Serializer):
     phone = serializers.CharField()
     code = serializers.CharField(max_length=6)
-    new_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True, min_length=8)
     new_password_repeat = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
         if attrs["new_password"] != attrs["new_password_repeat"]:
-            raise serializers.ValidationError("Parollar bir xil emas")
+            raise serializers.ValidationError({"new_password_repeat": "Parollar bir xil emas."})
 
-        otp = TelegramOTP.objects.filter(
-            phone=attrs["phone"],
-            code=attrs["code"],
-            purpose=TelegramOTP.Purpose.RESET_PASSWORD,
-            is_used=False
-        ).last()
-
-        if not otp:
-            raise serializers.ValidationError("Kod noto‘g‘ri")
-
-        if otp.is_expired():
-            raise serializers.ValidationError("Kod muddati tugagan")
+        try:
+            otp = verify_otp(
+                phone=attrs["phone"],
+                code=attrs["code"],
+                purpose=TelegramOTP.Purpose.RESET_PASSWORD,
+            )
+        except ValueError as e:
+            raise serializers.ValidationError({"code": str(e)})
 
         attrs["otp_obj"] = otp
         return attrs
@@ -143,16 +159,19 @@ class ForgotPasswordConfirmSerializer(serializers.Serializer):
     @transaction.atomic
     def save(self, **kwargs):
         otp = self.validated_data["otp_obj"]
-        user = User.objects.get(phone=self.validated_data["phone"], role=User.Role.CONSUMER)
-
+        user = User.objects.get(
+            phone=self.validated_data["phone"],
+            role=User.Role.CONSUMER,
+        )
         user.set_password(self.validated_data["new_password"])
         user.save(update_fields=["password"])
-
-        otp.is_used = True
-        otp.save(update_fields=["is_used"])
-
+        # otp is already marked used inside verify_otp()
         return user
 
+
+# ---------------------------------------------------------------------------
+# PROFILE update
+# ---------------------------------------------------------------------------
 
 class ProfileUpdateSerializer(serializers.ModelSerializer):
     class Meta:
@@ -160,85 +179,137 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
         fields = ["first_name", "last_name", "bio", "email", "avatar"]
 
 
-class OwnerCreateSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    password = serializers.CharField(write_only=True)
+# ---------------------------------------------------------------------------
+# PARTNER — email/password login (owner, superadmin, or any BranchStaff)
+# ---------------------------------------------------------------------------
 
-    def validate_email(self, value):
-        if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("Bu email allaqachon mavjud")
-        return value
-
-    @transaction.atomic
-    def create(self, validated_data):
-        request_user = self.context["request"].user
-
-        owner = User.objects.create_user(
-            email=validated_data["email"],
-            password=validated_data["password"],
-            role=User.Role.OWNER,
-            is_active=True
-        )
-
-        UserCreationAudit.objects.create(
-            creator=request_user,
-            created_user=owner
-        )
-        return owner
-
-
-class ManagerCreateSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    password = serializers.CharField(write_only=True)
-
-    def validate_email(self, value):
-        if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("Bu email allaqachon mavjud")
-        return value
-
-    @transaction.atomic
-    def create(self, validated_data):
-        request_user = self.context["request"].user
-
-        manager = User.objects.create_user(
-            email=validated_data["email"],
-            password=validated_data["password"],
-            role=User.Role.MANAGER,
-            is_active=True
-        )
-
-        UserCreationAudit.objects.create(
-            creator=request_user,
-            created_user=manager
-        )
-        return manager
-
-
-class EmailPasswordLoginSerializer(serializers.Serializer):
+class PartnerLoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
+        from staff.models import BranchStaff
+
         user = User.objects.filter(email=attrs["email"]).first()
-
         if not user:
-            raise serializers.ValidationError("Email yoki parol noto‘g‘ri")
-
+            raise serializers.ValidationError("Email yoki parol noto'g'ri.")
         if not user.check_password(attrs["password"]):
-            raise serializers.ValidationError("Email yoki parol noto‘g‘ri")
-
+            raise serializers.ValidationError("Email yoki parol noto'g'ri.")
         if not user.is_active:
-            raise serializers.ValidationError("User faol emas")
+            raise serializers.ValidationError("Foydalanuvchi faol emas.")
 
-        if user.role not in [User.Role.OWNER, User.Role.MANAGER, User.Role.SUPERADMIN]:
-            raise serializers.ValidationError("Bu login faqat partner userlar uchun")
+        is_partner = (
+            user.role in [User.Role.OWNER, User.Role.SUPERADMIN]
+            or BranchStaff.objects.filter(user=user, is_active=True).exists()
+        )
+        if not is_partner:
+            raise serializers.ValidationError("Bu login faqat partner foydalanuvchilar uchun.")
 
         attrs["user"] = user
         return attrs
 
-class TokenResponseSerializer(serializers.Serializer):
-    refresh = serializers.CharField()
-    access = serializers.CharField()
-    user = UserSerializer()
+
+# ---------------------------------------------------------------------------
+# SUPERADMIN — create owner
+# ---------------------------------------------------------------------------
+
+class OwnerCreateSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, min_length=8)
+
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("Bu email allaqachon mavjud.")
+        return value
+
+    @transaction.atomic
+    def create(self, validated_data):
+        request_user = self.context["request"].user
+        owner = User.objects.create_user(
+            email=validated_data["email"],
+            password=validated_data["password"],
+            role=User.Role.OWNER,
+            is_active=True,
+        )
+        UserCreationAudit.objects.create(creator=request_user, created_user=owner)
+        return owner
 
 
+# ---------------------------------------------------------------------------
+# OWNER / SUPERADMIN — create staff (manager, receptionist, waiter, waitress)
+# ---------------------------------------------------------------------------
+
+STAFF_ROLES = ["manager", "receptionist", "waiter", "waitress"]
+
+
+class StaffCreateSerializer(serializers.Serializer):
+    """
+    Owner yoki Superadmin tomonidan staff (manager, receptionist, waiter,
+    waitress) yaratish. Yaratilgan User CONSUMER role oladi va BranchStaff
+    yozuvi orqali branchga biriktiriladi.
+    """
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, min_length=8)
+    role = serializers.ChoiceField(choices=STAFF_ROLES)
+    branch_id = serializers.IntegerField()
+
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("Bu email allaqachon mavjud.")
+        return value
+
+    def validate(self, attrs):
+        from restaurants.models import Branch
+        from staff.models import BranchStaff
+
+        request_user = self.context["request"].user
+
+        # branch mavjudligini tekshirish
+        try:
+            branch = Branch.objects.select_related("brand").get(id=attrs["branch_id"])
+        except Branch.DoesNotExist:
+            raise serializers.ValidationError({"branch_id": "Branch topilmadi."})
+
+        # ruxsat tekshiruvi
+        if request_user.role == User.Role.SUPERADMIN:
+            pass  # hamma narsaga ruxsat
+        elif request_user.role == User.Role.OWNER:
+            if branch.brand.owner_id != request_user.id:
+                raise serializers.ValidationError({"branch_id": "Bu branch sizga tegishli emas."})
+            # owner manager yarata oladi, lekin boshqa owner yarata olmaydi
+        else:
+            # manager — faqat o'z branchiga, manager yarata olmaydi
+            if attrs["role"] == "manager":
+                raise serializers.ValidationError({"role": "Manager boshqa manager yarata olmaydi."})
+            if not BranchStaff.objects.filter(
+                user=request_user,
+                branch=branch,
+                role="manager",
+                is_active=True,
+            ).exists():
+                raise serializers.ValidationError({"branch_id": "Siz bu branchda manager emassiz."})
+
+        attrs["_branch"] = branch
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        from staff.models import BranchStaff
+
+        request_user = self.context["request"].user
+        branch = validated_data["_branch"]
+
+        staff_user = User.objects.create_user(
+            email=validated_data["email"],
+            password=validated_data["password"],
+            role=User.Role.CONSUMER,
+            is_active=True,
+        )
+        BranchStaff.objects.create(
+            branch=branch,
+            user=staff_user,
+            role=validated_data["role"],
+            is_active=True,
+        )
+        UserCreationAudit.objects.create(creator=request_user, created_user=staff_user)
+        return staff_user

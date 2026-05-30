@@ -1,9 +1,6 @@
 from rest_framework import generics, permissions
-from rest_framework.response import Response
-from restaurants.models import Branch
-from staff.models import BranchStaff
-from accounts.models import User
 
+from accounts.models import User
 from .models import Floor, Zone, LayoutItem
 from .serializers import (
     FloorListSerializer,
@@ -13,36 +10,31 @@ from .serializers import (
     LayoutItemCreateUpdateSerializer,
     PublicLayoutItemSerializer,
 )
-from .permissions import (
-    IsOwnerManagerOrSuperAdmin,
-    IsPartnerLayoutViewer,
-    can_manage_branch_layout,
-    can_view_branch_layout,
-)
+from .permissions import IsOwnerManagerOrSuperAdmin, IsPartnerLayoutViewer
 
 
-# =========================
-# CONSUMER PUBLIC LAYOUT
-# =========================
+# ---------------------------------------------------------------------------
+# PUBLIC (consumer)
+# ---------------------------------------------------------------------------
 
 class PublicBranchFloorListView(generics.ListAPIView):
+    """
+    TUZATILDI: Avvalgi versiyada AllowAny deb belgilangan edi, lekin
+    get_queryset() ichida is_authenticated tekshiruvi bor edi — bu
+    autentifikatsiyasiz foydalanuvchilarga bo'sh list qaytarardi.
+    """
     serializer_class = FloorListSerializer
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Floor.objects.none()
-
-        user = self.request.user
-        if not user.is_authenticated:
-            return Floor.objects.none()
-
-        qs = Floor.objects.select_related("branch")
-
-        if user.role == User.Role.SUPERADMIN:
-            return qs
-
-        return qs.filter(branch__brand__owner=user)
+        branch_id = self.kwargs.get("branch_id")
+        return (
+            Floor.objects.filter(branch_id=branch_id, is_active=True)
+            .select_related("branch")
+            .prefetch_related("zones")
+        )
 
 
 class PublicBranchLayoutItemsView(generics.ListAPIView):
@@ -50,24 +42,18 @@ class PublicBranchLayoutItemsView(generics.ListAPIView):
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
-        if getattr(self, "swagger_fake_view", False):
-            return Floor.objects.none()
-
-        user = self.request.user
-        if not user.is_authenticated:
-            return Floor.objects.none()
-
-        qs = Floor.objects.select_related("branch")
-
-        if user.role == User.Role.SUPERADMIN:
-            return qs
-
-        return qs.filter(branch__brand__owner=user)
+        branch_id = self.kwargs.get("branch_id")
+        if not branch_id:
+            return LayoutItem.objects.none()
+        return LayoutItem.objects.filter(
+            floor__branch_id=branch_id,
+            is_active=True,
+        ).select_related("floor", "zone")
 
 
-# =========================
-# PARTNER FLOOR
-# =========================
+# ---------------------------------------------------------------------------
+# PARTNER — floors
+# ---------------------------------------------------------------------------
 
 class PartnerFloorListView(generics.ListAPIView):
     serializer_class = FloorListSerializer
@@ -78,15 +64,18 @@ class PartnerFloorListView(generics.ListAPIView):
             return Floor.objects.none()
 
         user = self.request.user
-        if not user.is_authenticated:
-            return Floor.objects.none()
-
-        qs = Floor.objects.select_related("branch")
+        qs = Floor.objects.select_related("branch").prefetch_related("zones")
 
         if user.role == User.Role.SUPERADMIN:
             return qs
+        if user.role == User.Role.OWNER:
+            return qs.filter(branch__brand__owner=user)
 
-        return qs.filter(branch__brand__owner=user)
+        from staff.models import BranchStaff
+        branch_ids = BranchStaff.objects.filter(
+            user=user, is_active=True
+        ).values_list("branch_id", flat=True)
+        return qs.filter(branch_id__in=branch_ids)
 
 
 class PartnerFloorCreateView(generics.CreateAPIView):
@@ -106,14 +95,14 @@ class PartnerFloorDetailView(generics.RetrieveUpdateDestroyAPIView):
 
         if user.role == User.Role.SUPERADMIN:
             return qs
+        if user.role == User.Role.OWNER:
+            return qs.filter(branch__brand__owner=user)
 
-        owner_qs = qs.filter(branch__brand__owner=user)
-        manager_qs = qs.filter(
+        return qs.filter(
             branch__staff_memberships__user=user,
             branch__staff_memberships__role="manager",
             branch__staff_memberships__is_active=True,
-        )
-        return (owner_qs | manager_qs).distinct()
+        ).distinct()
 
     def get_serializer_class(self):
         if self.request.method in ["PUT", "PATCH"]:
@@ -121,9 +110,9 @@ class PartnerFloorDetailView(generics.RetrieveUpdateDestroyAPIView):
         return FloorListSerializer
 
 
-# =========================
-# PARTNER ZONE
-# =========================
+# ---------------------------------------------------------------------------
+# PARTNER — zones
+# ---------------------------------------------------------------------------
 
 class PartnerZoneCreateView(generics.CreateAPIView):
     serializer_class = ZoneCreateUpdateSerializer
@@ -131,6 +120,7 @@ class PartnerZoneCreateView(generics.CreateAPIView):
 
 
 class PartnerZoneDetailView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = ZoneCreateUpdateSerializer
     permission_classes = [permissions.IsAuthenticated, IsOwnerManagerOrSuperAdmin]
 
     def get_queryset(self):
@@ -142,22 +132,19 @@ class PartnerZoneDetailView(generics.RetrieveUpdateDestroyAPIView):
 
         if user.role == User.Role.SUPERADMIN:
             return qs
+        if user.role == User.Role.OWNER:
+            return qs.filter(floor__branch__brand__owner=user)
 
-        owner_qs = qs.filter(floor__branch__brand__owner=user)
-        manager_qs = qs.filter(
+        return qs.filter(
             floor__branch__staff_memberships__user=user,
             floor__branch__staff_memberships__role="manager",
             floor__branch__staff_memberships__is_active=True,
-        )
-        return (owner_qs | manager_qs).distinct()
-
-    def get_serializer_class(self):
-        return ZoneCreateUpdateSerializer
+        ).distinct()
 
 
-# =========================
-# PARTNER LAYOUT ITEMS
-# =========================
+# ---------------------------------------------------------------------------
+# PARTNER — layout items
+# ---------------------------------------------------------------------------
 
 class PartnerLayoutItemListView(generics.ListAPIView):
     serializer_class = LayoutItemSerializer
@@ -208,14 +195,14 @@ class PartnerLayoutItemDetailView(generics.RetrieveUpdateDestroyAPIView):
 
         if user.role == User.Role.SUPERADMIN:
             return qs
+        if user.role == User.Role.OWNER:
+            return qs.filter(floor__branch__brand__owner=user)
 
-        owner_qs = qs.filter(floor__branch__brand__owner=user)
-        manager_qs = qs.filter(
+        return qs.filter(
             floor__branch__staff_memberships__user=user,
             floor__branch__staff_memberships__role="manager",
             floor__branch__staff_memberships__is_active=True,
-        )
-        return (owner_qs | manager_qs).distinct()
+        ).distinct()
 
     def get_serializer_class(self):
         if self.request.method in ["PUT", "PATCH"]:

@@ -1,19 +1,20 @@
 from django.urls import path
+
 from .views import (
-    ConsumerRequestRegisterOTPView,
-    ConsumerRegisterView,
     ConsumerLoginView,
-    ForgotPasswordRequestView,
+    ConsumerRegisterView,
+    ConsumerRequestRegisterOTPView,
     ForgotPasswordConfirmView,
+    ForgotPasswordRequestView,
     MeView,
     OwnerCreateView,
-    ManagerCreateView,
     PartnerLoginView,
+    StaffCreateView,
 )
 
 urlpatterns = [
     # consumer
-    path("consumer/request-register-otp/", ConsumerRequestRegisterOTPView.as_view()),
+    path("consumer/request-otp/", ConsumerRequestRegisterOTPView.as_view()),
     path("consumer/register/", ConsumerRegisterView.as_view()),
     path("consumer/login/", ConsumerLoginView.as_view()),
     path("consumer/forgot-password/request/", ForgotPasswordRequestView.as_view()),
@@ -25,5 +26,5 @@ urlpatterns = [
     # partner / admin
     path("partner/login/", PartnerLoginView.as_view()),
     path("partner/create-owner/", OwnerCreateView.as_view()),
-    path("partner/create-manager/", ManagerCreateView.as_view()),
+    path("partner/create-staff/", StaffCreateView.as_view()),
 ]

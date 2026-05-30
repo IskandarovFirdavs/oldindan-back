@@ -1,5 +1,5 @@
 @baseUrl = http://127.0.0.1:8000/api/restaurants
-@ownerToken = YOUR_OWNER_ACCESS_TOKEN
+@ownerToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzc3ODAwMDk4LCJpYXQiOjE3Nzc3OTk3OTgsImp0aSI6ImM5NzViMTM3MmEzZDQ3OTE5MDk1YWQzNGRlNzVhMGY1IiwidXNlcl9pZCI6IjIifQ.r-4VjUMbZgGxIWPEfBYac1e-oiPjAjI1V1g7AwSP8iY
 @superToken = YOUR_SUPERADMIN_ACCESS_TOKEN
 
 ### Public branches list
@@ -34,9 +34,9 @@ Content-Type: application/json
 
 {
   "brand": 1,
-  "name": "OLDINDAN Chilonzor",
-  "slug": "oldindan-chilonzor",
-  "address": "Chilonzor, Tashkent",
+  "name": "Kfc Almazor",
+  "slug": "kfc-almazor",
+  "address": "Almazor, Tashkent",
   "latitude": 41.275,
   "longitude": 69.203,
   "phone": "998901112233",
@@ -46,7 +46,21 @@ Content-Type: application/json
   "deposit_amount": 0,
   "working_hours": {
     "mon": ["09:00", "23:00"],
-    "tue": ["09:00", "23:00"]
+    "tue": ["09:00", "23:00"],
+    "wed": ["09:00", "23:00"],
+    "thu": ["09:00", "23:00"],
+    "fri": ["09:00", "23:00"],
+    "sat": ["10:00", "00:00"],
+    "sun": ["10:00", "22:00"]
+  },
+  "booking_hours": {
+    "mon": ["10:00", "22:30"],
+    "tue": ["10:00", "22:30"],
+    "wed": ["10:00", "22:30"],
+    "thu": ["10:00", "22:30"],
+    "fri": ["10:00", "23:00"],
+    "sat": ["11:00", "23:30"],
+    "sun": ["11:00", "21:30"]
   }
 }
 

@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from restaurants.models import Branch
+from staff.models import BranchStaff, User
 from .models import Floor, Zone, LayoutItem
 from .permissions import can_manage_branch_layout
 
@@ -63,10 +64,21 @@ class ZoneCreateUpdateSerializer(serializers.ModelSerializer):
 
     def validate_floor(self, value):
         request = self.context["request"]
-        if not can_manage_branch_layout(request.user, value.branch):
-            raise serializers.ValidationError("Bu floor ga zone qo'shishga ruxsat yo'q")
+        # Owner tekshiruvi
+        if request.user.role == User.Role.OWNER:
+            if value.branch.brand.owner_id != request.user.id:
+                raise serializers.ValidationError("Bu floor sizga tegishli emas")
+        # Manager tekshiruvi
+        elif request.user.role == User.Role.MANAGER:
+            if not BranchStaff.objects.filter(
+                user=request.user,
+                branch=value.branch,
+                role="manager",
+                is_active=True
+            ).exists():
+                raise serializers.ValidationError("Bu floor ga zone qo'shishga ruxsat yo'q")
         return value
-
+    
 
 class LayoutItemCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:

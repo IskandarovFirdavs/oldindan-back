@@ -80,6 +80,7 @@ class BranchDetailSerializer(serializers.ModelSerializer):
             "deposit_enabled",
             "deposit_amount",
             "working_hours",
+            "booking_hours",
             "images",
             "created_at",
             "updated_at",
@@ -103,6 +104,7 @@ class BranchCreateUpdateSerializer(serializers.ModelSerializer):
             "deposit_enabled",
             "deposit_amount",
             "working_hours",
+            "booking_hours",
         ]
         read_only_fields = ["id"]
 

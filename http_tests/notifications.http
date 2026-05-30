@@ -1,7 +1,7 @@
 ### Notification API Test
 
 @baseUrl = http://localhost:8000/api
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzc3NzU4NjYxLCJpYXQiOjE3Nzc3NTgzNjEsImp0aSI6IjAwNmI2MmE4MGY5YzQxZWI5ZDRmMDQwNzkxMDA2ZjI5IiwidXNlcl9pZCI6IjIifQ.oCsW8Swe-e97rBBDvi-dA2TzEcgmd9VbiPDs7go-clI
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzc3Nzk3NzM4LCJpYXQiOjE3Nzc3OTc0MzgsImp0aSI6ImQzNDZmYjhkZTI1NjRiNzZiZTliMGI0Mjk4YzUzNmNiIiwidXNlcl9pZCI6IjYifQ.ReQ2mDbllDlJSAz38dYURG5pPQcabGAZWFg3EJbmvGE
 
 ### 1. Barcha notificationlarni ko'rish
 GET {{baseUrl}}/notifications/notifications/
@@ -12,7 +12,7 @@ GET {{baseUrl}}/notifications/notifications/?is_read=false
 Authorization: Bearer {{token}}
 
 ### 3. Bitta notificationni o'qilgan qilish (PATCH)
-PATCH {{baseUrl}}/notifications/notifications/2/mark-read/
+PATCH {{baseUrl}}/notifications/notifications/3/mark-read/
 Authorization: Bearer {{token}}
 Content-Type: application/json
 

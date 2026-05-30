@@ -48,7 +48,8 @@ class Branch(models.Model):
     deposit_amount = models.PositiveIntegerField(default=0)
 
     working_hours = models.JSONField(default=dict, blank=True)
-
+    booking_hours = models.JSONField(default=dict, blank=True) 
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

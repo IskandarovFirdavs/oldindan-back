@@ -1,31 +1,37 @@
-from rest_framework.views import APIView
+from rest_framework import permissions, status
 from rest_framework.response import Response
-from rest_framework import status, permissions
+from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from .models import User
+from .permissions import IsSuperAdmin, IsOwnerOrSuperAdmin, IsOwnerOrManager
 from .serializers import (
     ConsumerRequestRegisterOTPSerializer,
     ConsumerRegisterSerializer,
     LoginSerializer,
     ForgotPasswordRequestSerializer,
     ForgotPasswordConfirmSerializer,
-    ProfileUpdateSerializer,
-    UserSerializer,
     OwnerCreateSerializer,
-    ManagerCreateSerializer,
-    EmailPasswordLoginSerializer,
+    PartnerLoginSerializer,
+    ProfileUpdateSerializer,
+    StaffCreateSerializer,
+    UserSerializer,
 )
-from .permissions import IsSuperAdmin, IsOwnerOrSuperAdmin
 
 
-def build_auth_response(user):
+def build_auth_response(user: User) -> dict:
+    """JWT tokenlar va user ma'lumotlarini qaytaradi."""
     refresh = RefreshToken.for_user(user)
     return {
         "refresh": str(refresh),
         "access": str(refresh.access_token),
-        "user": UserSerializer(user).data
+        "user": UserSerializer(user).data,
     }
 
+
+# ---------------------------------------------------------------------------
+# CONSUMER
+# ---------------------------------------------------------------------------
 
 class ConsumerRequestRegisterOTPView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -34,7 +40,8 @@ class ConsumerRequestRegisterOTPView(APIView):
         serializer = ConsumerRequestRegisterOTPSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response({"detail": "SMS kod yuborildi"}, status=status.HTTP_200_OK)
+        return Response({"detail": "SMS kod yuborildi."}, status=status.HTTP_200_OK)
+
 
 class ConsumerRegisterView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -63,7 +70,8 @@ class ForgotPasswordRequestView(APIView):
         serializer = ForgotPasswordRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response({"detail": "SMS kod yuborildi"}, status=status.HTTP_200_OK)
+        return Response({"detail": "SMS kod yuborildi."}, status=status.HTTP_200_OK)
+
 
 class ForgotPasswordConfirmView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -72,8 +80,12 @@ class ForgotPasswordConfirmView(APIView):
         serializer = ForgotPasswordConfirmSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response({"detail": "Parol yangilandi"}, status=status.HTTP_200_OK)
+        return Response({"detail": "Parol muvaffaqiyatli yangilandi."}, status=status.HTTP_200_OK)
 
+
+# ---------------------------------------------------------------------------
+# PROFILE
+# ---------------------------------------------------------------------------
 
 class MeView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -82,13 +94,36 @@ class MeView(APIView):
         return Response(UserSerializer(request.user).data)
 
     def patch(self, request):
-        serializer = ProfileUpdateSerializer(instance=request.user, data=request.data, partial=True)
+        serializer = ProfileUpdateSerializer(
+            instance=request.user,
+            data=request.data,
+            partial=True,
+        )
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(UserSerializer(request.user).data)
 
 
+# ---------------------------------------------------------------------------
+# PARTNER
+# ---------------------------------------------------------------------------
+
+class PartnerLoginView(APIView):
+    """
+    Owner, superadmin va BranchStaff (manager, receptionist, waiter, waitress)
+    uchun email/password login.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = PartnerLoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data["user"]
+        return Response(build_auth_response(user), status=status.HTTP_200_OK)
+
+
 class OwnerCreateView(APIView):
+    """Faqat Superadmin yangi Owner yaratadi."""
     permission_classes = [permissions.IsAuthenticated, IsSuperAdmin]
 
     def post(self, request):
@@ -98,21 +133,15 @@ class OwnerCreateView(APIView):
         return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
 
 
-class ManagerCreateView(APIView):
-    permission_classes = [permissions.IsAuthenticated, IsOwnerOrSuperAdmin]
+class StaffCreateView(APIView):
+    """
+    Owner yoki Manager tomonidan staff yaratish.
+    Role: manager, receptionist, waiter, waitress.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrManager]
 
     def post(self, request):
-        serializer = ManagerCreateSerializer(data=request.data, context={"request": request})
+        serializer = StaffCreateSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
         return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
-
-
-class PartnerLoginView(APIView):
-    permission_classes = [permissions.AllowAny]
-
-    def post(self, request):
-        serializer = EmailPasswordLoginSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.validated_data["user"]
-        return Response(build_auth_response(user), status=status.HTTP_200_OK)

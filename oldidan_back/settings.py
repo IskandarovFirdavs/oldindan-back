@@ -1,12 +1,5 @@
 from pathlib import Path
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-SECRET_KEY = 'django-insecure-9t-hb25unq77!(7ftr!hu$@phklbwa156-px$6$nbd_0ge@w1*'
-
-DEBUG = True
-
-from pathlib import Path
+from datetime import timedelta
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -121,11 +114,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
 LANGUAGE_CODE = 'en'
-
-TIME_ZONE = 'Asia/Tashkent'
-
 USE_I18N = True
 
+TIME_ZONE = 'Asia/Tashkent'
 USE_TZ = True
 
 
@@ -159,3 +150,9 @@ ESKIZ_EMAIL = "iskandarovfirdavs09@gmail.com"
 ESKIZ_SECRET_KEY = ""
 ESKIZ_FROM = "4546"  # yoki cabinetdagi sender
 ESKIZ_TEST_MODE = True
+
+
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(days=36500),  # 100 yil
+}

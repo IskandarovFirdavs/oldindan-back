@@ -1,33 +1,36 @@
 from rest_framework import generics, permissions
+
 from accounts.models import User
 from .models import Table
-from .serializers import (
-    TableSerializer,
-    TableCreateUpdateSerializer,
-    PublicTableSerializer,
-)
-from .permissions import (
-    IsOwnerManagerOrSuperAdmin,
-    IsPartnerTableViewer,
-)
+from .serializers import TableSerializer, TableCreateUpdateSerializer, PublicTableSerializer
+from .permissions import IsOwnerManagerOrSuperAdmin, IsPartnerTableViewer
 
 
-# =========================
-# PUBLIC / CONSUMER
-# =========================
+def _table_qs_for_user(user):
+    qs = Table.objects.select_related("branch__brand", "floor", "zone", "layout_item")
+    if user.role == User.Role.SUPERADMIN:
+        return qs
+    if user.role == User.Role.OWNER:
+        return qs.filter(branch__brand__owner=user)
+    # Manager / Receptionist — only their assigned branch
+    return qs.filter(branch=user.branch)
+
+
+# ────────────────────────────────────────────────────────────
+# PUBLIC
+# ────────────────────────────────────────────────────────────
 
 class PublicBranchTableListView(generics.ListAPIView):
-    serializer_class = PublicTableSerializer
+    serializer_class   = PublicTableSerializer
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Table.objects.none()
-        
-    
+
         branch_id = self.kwargs["branch_id"]
-        floor_id = self.request.query_params.get("floor_id")
-        zone_id = self.request.query_params.get("zone_id")
+        floor_id  = self.request.query_params.get("floor_id")
+        zone_id   = self.request.query_params.get("zone_id")
 
         qs = Table.objects.filter(
             branch_id=branch_id,
@@ -38,61 +41,41 @@ class PublicBranchTableListView(generics.ListAPIView):
 
         if floor_id:
             qs = qs.filter(floor_id=floor_id)
-
         if zone_id:
             qs = qs.filter(zone_id=zone_id)
-
         return qs
 
 
-# =========================
+# ────────────────────────────────────────────────────────────
 # PARTNER
-# =========================
+# ────────────────────────────────────────────────────────────
 
 class PartnerTableListView(generics.ListAPIView):
-    serializer_class = TableSerializer
+    serializer_class   = TableSerializer
     permission_classes = [permissions.IsAuthenticated, IsPartnerTableViewer]
-    
+
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Table.objects.none()
 
-        user = self.request.user
-        branch_id = self.request.query_params.get("branch_id")
-        floor_id = self.request.query_params.get("floor_id")
-        zone_id = self.request.query_params.get("zone_id")
+        params    = self.request.query_params
+        branch_id = params.get("branch_id")
+        floor_id  = params.get("floor_id")
+        zone_id   = params.get("zone_id")
 
-        qs = Table.objects.select_related(
-            "branch__brand",
-            "floor",
-            "zone",
-            "layout_item",
-        )
-
-        if user.role == User.Role.SUPERADMIN:
-            pass
-        elif user.role == User.Role.OWNER:
-            qs = qs.filter(branch__brand__owner=user)
-        else:
-            qs = qs.filter(
-                branch__staff_memberships__user=user,
-                branch__staff_memberships__is_active=True,
-            )
+        qs = _table_qs_for_user(self.request.user)
 
         if branch_id:
             qs = qs.filter(branch_id=branch_id)
-
         if floor_id:
             qs = qs.filter(floor_id=floor_id)
-
         if zone_id:
             qs = qs.filter(zone_id=zone_id)
-
-        return qs.distinct()
+        return qs
 
 
 class PartnerTableCreateView(generics.CreateAPIView):
-    serializer_class = TableCreateUpdateSerializer
+    serializer_class   = TableCreateUpdateSerializer
     permission_classes = [permissions.IsAuthenticated, IsOwnerManagerOrSuperAdmin]
 
 
@@ -102,25 +85,7 @@ class PartnerTableDetailView(generics.RetrieveUpdateDestroyAPIView):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Table.objects.none()
-
-        user = self.request.user
-        qs = Table.objects.select_related(
-            "branch__brand",
-            "floor",
-            "zone",
-            "layout_item",
-        )
-
-        if user.role == User.Role.SUPERADMIN:
-            return qs
-
-        owner_qs = qs.filter(branch__brand__owner=user)
-        manager_qs = qs.filter(
-            branch__staff_memberships__user=user,
-            branch__staff_memberships__role="manager",
-            branch__staff_memberships__is_active=True,
-        )
-        return (owner_qs | manager_qs).distinct()
+        return _table_qs_for_user(self.request.user)
 
     def get_serializer_class(self):
         if self.request.method in ["PUT", "PATCH"]:

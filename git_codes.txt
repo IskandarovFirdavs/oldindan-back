@@ -1,0 +1,20 @@
+# Hozirgi holatni saqla
+git status
+
+# Dev branchdagi hamma commitlarni remotega yubor
+git push origin dev
+
+# Main branchga o't
+git checkout main
+
+# Mainni yangila
+git pull origin main
+
+# Devni mainga merge qil
+git merge dev
+
+# Mainni GitHubga yubor
+git push origin main
+
+# Yana dev branchga qayt
+git checkout dev

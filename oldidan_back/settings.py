@@ -41,7 +41,6 @@ INSTALLED_APPS = [
     
     "accounts",
     "restaurants",
-    "staff",
     "layouts",
     "tables",
     "bookings",

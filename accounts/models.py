@@ -4,12 +4,13 @@ from datetime import timedelta
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
 from django.utils import timezone
+from restaurants.models import Branch  # branchga attach qilish uchun
 
 
 class UserManager(BaseUserManager):
     def create_user(self, phone=None, email=None, password=None, **extra_fields):
         if not phone and not email:
-            raise ValueError("Phone yoki email bo'lishi shart")
+            raise ValueError("Phone or email is required.")
         if email:
             email = self.normalize_email(email)
         user = self.model(phone=phone, email=email, **extra_fields)
@@ -26,7 +27,7 @@ class UserManager(BaseUserManager):
         extra_fields.setdefault("is_superuser", True)
         extra_fields.setdefault("is_active", True)
         if not password:
-            raise ValueError("Superuser uchun password shart")
+            raise ValueError("Superuser needs a password.")
         return self.create_user(phone=phone, email=email, password=password, **extra_fields)
 
 
@@ -34,6 +35,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     class Role(models.TextChoices):
         CONSUMER = "consumer", "Consumer"
         OWNER = "owner", "Owner"
+        MANAGER = "manager", "Manager"
+        RECEPTIONIST = "receptionist", "Receptionist"
         SUPERADMIN = "superadmin", "Superadmin"
 
     phone = models.CharField(max_length=20, unique=True, null=True, blank=True)
@@ -45,6 +48,15 @@ class User(AbstractBaseUser, PermissionsMixin):
     avatar = models.ImageField(upload_to="avatars/", null=True, blank=True)
 
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.CONSUMER)
+
+    # Faqat manager va receptionist uchun branch
+    branch = models.ForeignKey(
+        Branch,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="staff_users"
+    )
 
     is_phone_verified = models.BooleanField(default=False)
     is_email_verified = models.BooleanField(default=False)
@@ -74,12 +86,6 @@ class User(AbstractBaseUser, PermissionsMixin):
     def full_name(self):
         return f"{self.first_name} {self.last_name}".strip() or self.phone or self.email
 
-    @property
-    def is_staff_member(self):
-        """Foydalanuvchi BranchStaff da bor-yo'qligini tekshiradi."""
-        from staff.models import BranchStaff
-        return BranchStaff.objects.filter(user=self, is_active=True).exists()
-
 
 class TelegramOTP(models.Model):
     class Purpose(models.TextChoices):
@@ -97,9 +103,7 @@ class TelegramOTP(models.Model):
 
     class Meta:
         ordering = ["-id"]
-        indexes = [
-            models.Index(fields=["phone", "purpose", "is_used"]),
-        ]
+        indexes = [models.Index(fields=["phone", "purpose", "is_used"])]
 
     def is_expired(self):
         return timezone.now() > self.expires_at
@@ -113,12 +117,3 @@ class TelegramOTP(models.Model):
 
     def __str__(self):
         return f"{self.phone} - {self.purpose}"
-
-
-class UserCreationAudit(models.Model):
-    creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name="created_users")
-    created_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="created_by_logs")
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"{self.creator_id} -> {self.created_user_id}"

@@ -1,160 +1,144 @@
 @baseUrl = http://127.0.0.1:8000/api/accounts
-@consumerToken = consumer_login_dan_olingan_token
-@ownerToken = owner_login_dan_olingan_token
-@managerToken = manager_login_dan_olingan_token
-@superadminToken = superadmin_login_dan_olingan_token
-### =========================
-### SUPERUSER LOGIN
-### =========================
-POST {{baseUrl}}/consumer/login/
-Content-Type: application/json
+@consumer_token = consumer_login_dan_olingan_token
+@owner_token = owner_login_dan_olingan_token
+@manager_token = manager_login_dan_olingan_token
+@receptionist_token = receptionist_login_dan_olingan_token
+@partner_token = partner_login_dan_olingan_token
+@superadmin_token = superadmin_login_dan_olingan_token
 
-{
-  "phone": "admin",
-  "password": "admin"
-}
 
-### =========================
-### CONSUMER REGISTER OTP
-### =========================
+@baseUrl = http://127.0.0.1:8000/api/accounts
+
+### ===========================
+### CONSUMER
+### ===========================
 POST {{baseUrl}}/consumer/request-register-otp/
 Content-Type: application/json
+{"phone": "998901234567"}
 
-{
-  "phone": "998940195649"
-}
-
-### =========================
-### CONSUMER REGISTER
-### =========================
 POST {{baseUrl}}/consumer/register/
 Content-Type: application/json
-
-{
-  "phone": "998940195649",
-  "code": "458017",
-  "first_name": "Firdavs",
-  "last_name": "Iskandarov",
-  "password": "12345678",
-  "password_repeat": "12345678"
-}
-
-### =========================
-### CONSUMER LOGIN
-### =========================
-POST {{baseUrl}}/consumer/login/
-Content-Type: application/json
-
-{
-  "phone": "940195645",
-  "password": "lorem2009"
-}
-
-### =========================
-### GET PROFILE
-### =========================
-GET {{baseUrl}}/me/
-Authorization: Bearer {{consumerToken}}
-
-### =========================
-### UPDATE PROFILE
-### =========================
-PATCH {{baseUrl}}/me/
-Authorization: Bearer {{consumerToken}}
-Content-Type: application/json
-
-{
-  "first_name": "Firdavs Updated",
-  "bio": "Backend dev 🚀",
-  "email": "test@mail.com"
-}
-
-### =========================
-### FORGOT PASSWORD REQUEST
-### =========================
-POST {{baseUrl}}/consumer/forgot-password/request/
-Content-Type: application/json
-
-{
-  "phone": "998901234567"
-}
-
-### =========================
-### FORGOT PASSWORD CONFIRM
-### =========================
-POST {{baseUrl}}/consumer/forgot-password/confirm/
-Content-Type: application/json
-
 {
   "phone": "998901234567",
-  "code": "370278",
-  "new_password": "87654321",
-  "new_password_repeat": "87654321"
+  "code": "123456",
+  "first_name": "John",
+  "last_name": "Doe",
+  "password": "pass123",
+  "password_repeat": "pass123"
 }
 
-### =========================
-### CREATE OWNER (SUPERADMIN ONLY)
-### =========================
-POST {{baseUrl}}/partner/create-owner/
-Authorization: Bearer {{superadminToken}}
+POST {{baseUrl}}/consumer/login/
 Content-Type: application/json
+{
+  "phone": "998901234567",
+  "password": "pass123"
+}
 
+POST {{baseUrl}}/consumer/forgot-password/request/
+Content-Type: application/json
+{"phone": "998901234567"}
+
+POST {{baseUrl}}/consumer/forgot-password/confirm/
+Content-Type: application/json
+{
+  "phone": "998901234567",
+  "code": "654321",
+  "new_password": "newpass123",
+  "new_password_repeat": "newpass123"
+}
+
+
+### ===========================
+### OWNER
+### ===========================
+POST {{baseUrl}}/owner/register/
+Content-Type: application/json
+{
+  "email": "owner@resto.com",
+  "first_name": "Restaurant",
+  "last_name": "Owner",
+  "password": "owner123",
+  "password_repeat": "owner123"
+}
+
+POST {{baseUrl}}/owner/login/
+Content-Type: application/json
+{
+  "email": "owner@resto.com",
+  "password": "owner123"
+}
+
+POST {{baseUrl}}/owner/forgot-password/request/
+Content-Type: application/json
+{"email": "owner@resto.com"}
+
+POST {{baseUrl}}/owner/forgot-password/confirm/
+Content-Type: application/json
+{
+  "email": "owner@resto.com",
+  "code": "123456",
+  "new_password": "newowner123",
+  "new_password_repeat": "newowner123"
+}
+
+
+### ===========================
+### MANAGER / RECEPTIONIST
+### ===========================
+POST {{baseUrl}}/staff/register/
+Content-Type: application/json
+{
+  "email": "manager@resto.com",
+  "first_name": "Jane",
+  "last_name": "Manager",
+  "role": "manager",
+  "branch_id": 1,
+  "password": "staff123",
+  "password_repeat": "staff123"
+}
+
+POST {{baseUrl}}/staff/login/
+Content-Type: application/json
+{
+  "email": "manager@resto.com",
+  "password": "staff123"
+}
+
+POST {{baseUrl}}/staff/forgot-password/request/
+Content-Type: application/json
+{"email": "manager@resto.com"}
+
+POST {{baseUrl}}/staff/forgot-password/confirm/
+Content-Type: application/json
+{
+  "email": "manager@resto.com",
+  "code": "123456",
+  "new_password": "newstaff123",
+  "new_password_repeat": "newstaff123"
+}
+
+
+### ===========================
+### PROFILE
+### ===========================
+GET {{baseUrl}}/me/
+Authorization: Bearer {{receptionist_token}}
+
+PATCH {{baseUrl}}/me/
+Authorization: Bearer {{receptionist_token}}
+Content-Type: application/json
+{
+  "bio": "I love working here!"
+}
+
+
+### ===========================
+### SUPERADMIN CREATE OWNER
+### ===========================
+POST {{baseUrl}}/create-owner/
+Authorization: Bearer {{superadmin_token}}
+Content-Type: application/json
 {
   "email": "newowner@example.com",
-  "password": "12345678"
-}
-
-### =========================
-### CREATE STAFF (OWNER OR MANAGER)
-### =========================
-# Owner -> manager, receptionist, waiter, waitress yarata oladi
-# Manager -> receptionist, waiter, waitress yarata oladi (manager yarata olmaydi)
-POST {{baseUrl}}/partner/create-staff/
-Authorization: Bearer {{ownerToken}}
-Content-Type: application/json
-
-{
-  "email": "newmanager@example.com",
-  "password": "12345678",
-  "role": "manager",
-  "branch_id": 1
-}
-
-### =========================
-### CREATE STAFF (MANAGER YARATISHI - receptionist)
-### =========================
-POST {{baseUrl}}/partner/create-staff/
-Authorization: Bearer {{managerToken}}
-Content-Type: application/json
-
-{
-  "email": "newreceptionist@example.com",
-  "password": "12345678",
-  "role": "receptionist",
-  "branch_id": 1
-}
-
-### =========================
-### CREATE STAFF (MANAGER YARATISHI - waiter)
-### =========================
-POST {{baseUrl}}/partner/create-staff/
-Authorization: Bearer {{managerToken}}
-Content-Type: application/json
-
-{
-  "email": "newwaiter@example.com",
-  "password": "12345678",
-  "role": "waiter",
-  "branch_id": 1
-}
-
-### =========================
-### PARTNER LOGIN (OWNER / MANAGER / RECEPTIONIST / WAITER / WAITRESS)
-### =========================
-POST {{baseUrl}}/partner/login/
-Content-Type: application/json
-
-{
-  "email": "kfc@gmail.com",
-  "password": "lorem2009"
+  "password": "ownerpass123"
 }

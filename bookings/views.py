@@ -528,25 +528,26 @@ class BookingMessageListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        booking_pk = self.kwargs["pk"]
-        user       = self.request.user
-
-        # Determine access
+        if getattr(self, "swagger_fake_view", False):
+            return Message.objects.none()
+    
+        booking_pk = self.kwargs.get("pk")
+    
+        if not booking_pk:
+            return Message.objects.none()
+    
+        user = self.request.user
+    
         booking = Booking.objects.filter(pk=booking_pk).select_related("branch__brand").first()
         if not booking:
             return Message.objects.none()
-
-        is_guest   = booking.user_id == user.id
+    
+        is_guest = booking.user_id == user.id
         is_partner = can_manage_branch_bookings(user, booking.branch)
+    
         if not is_guest and not is_partner:
             return Message.objects.none()
-
-        # Mark messages from the other side as read
-        if is_guest:
-            Message.objects.filter(booking=booking, is_read=False).exclude(sender=user).update(is_read=True)
-        elif is_partner:
-            Message.objects.filter(booking=booking, is_read=False, sender=booking.user).update(is_read=True)
-
+    
         return Message.objects.filter(booking=booking).select_related("sender")
 
 

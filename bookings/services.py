@@ -1,13 +1,33 @@
 """
-Booking business logic.
+Booking business logic — OLDINDAN platform.
 
-Rules:
-  - Serializer validates field FORMAT only (type, required, min/max).
-  - All business rules live HERE — working hours, overlap, capacity, cleaning.
-  - create_booking() is the ONLY place that writes a Booking row.
-  - select_for_update() prevents the race condition where two simultaneous
-    requests both pass the availability check and both create a booking for
-    the same table at the same time.
+SLOT SYSTEM (new):
+  - Bookings happen in 30-minute blocks aligned to the branch's working hours.
+    Example: branch opens 10:00, so slots are 10:00-10:30, 10:30-11:00, etc.
+  - User picks one or more CONSECUTIVE slots (max 6 = 3 hours total).
+  - Frontend shows green (available) / red (booked) for each slot.
+  - booking_start = first selected slot start
+  - booking_end   = last selected slot end
+  - Minimum advance: 1 hour before booking_start
+  - Maximum duration: 3 hours (6 × 30-min slots)
+  - NO cleaning time between bookings.
+  - NO minimum/maximum duration validation beyond the 30-min slot grid + 3h max.
+
+BOOKING NUMBER:
+  - Each booking gets a unique #XXXXXX code generated on save.
+  - Receptionist uses this to check in the guest.
+
+STATUS FLOW:
+  pending  → confirmed (auto if branch.auto_confirm=True, else partner manually)
+           → canceled (by partner with reason, or by consumer)
+  confirmed → checked_in (receptionist scans/enters booking number)
+            → canceled (with reason)
+            → no_show (auto after grace period)
+  checked_in → completed (receptionist marks when guest pays & leaves)
+             → canceled
+  completed → (terminal)
+  canceled  → (terminal)
+  no_show   → (terminal)
 """
 from datetime import datetime, time, timedelta
 
@@ -68,17 +88,20 @@ def validate_booking_relations(branch, floor, zone, table):
 
 
 # ============================================================
-# 3. TIME VALIDATION
+# 3. TIME VALIDATION (slot-based system)
 # ============================================================
 
 def _parse_time(value: str) -> time:
-    """Parse 'HH:MM' or 'H:MM' — never use string comparison for time."""
+    """Parse 'HH:MM' string — always use this, never string comparison."""
     try:
         return datetime.strptime(value.strip(), "%H:%M").time()
     except (ValueError, AttributeError):
-        raise ValueError(
-            f"Invalid working hours format: '{value}'. Expected 'HH:MM'."
-        )
+        raise ValueError(f"Invalid working hours format: '{value}'. Expected 'HH:MM'.")
+
+
+def _align_to_slot(dt) -> bool:
+    """Returns True if dt is aligned to a 30-minute boundary (:00 or :30)."""
+    return dt.minute in (0, 30) and dt.second == 0 and dt.microsecond == 0
 
 
 def validate_basic_time(booking_start, booking_end):
@@ -91,42 +114,52 @@ def validate_basic_time(booking_start, booking_end):
         raise ValueError("Cannot book more than 30 days in advance.")
 
 
+def validate_slot_alignment(booking_start, booking_end):
+    """Both start and end must be on 30-minute boundaries."""
+    if not _align_to_slot(booking_start):
+        raise ValueError(
+            "Booking start must be on a 30-minute boundary (e.g. 10:00, 10:30, 11:00)."
+        )
+    if not _align_to_slot(booking_end):
+        raise ValueError(
+            "Booking end must be on a 30-minute boundary (e.g. 10:30, 11:00, 11:30)."
+        )
+
+
 def validate_min_advance(booking_start):
-    if booking_start < timezone.now() + timedelta(hours=2):
-        raise ValueError("Booking must be made at least 2 hours in advance.")
+    """Booking must be made at least 1 hour before the slot starts."""
+    if booking_start < timezone.now() + timedelta(hours=1):
+        raise ValueError("Booking must be made at least 1 hour in advance.")
 
 
 def validate_duration(booking_start, booking_end):
+    """Minimum 30 min (1 slot), maximum 3 hours (6 slots)."""
     total_minutes = int((booking_end - booking_start).total_seconds() // 60)
     if total_minutes < 30:
+        raise ValueError("Minimum booking duration is 30 minutes (1 slot).")
+    if total_minutes > 180:
         raise ValueError(
-            f"Minimum booking duration is 30 minutes. You entered {total_minutes} minutes."
-        )
-    if total_minutes > 240:
-        raise ValueError(
-            f"Maximum booking duration is 4 hours (240 minutes). You entered {total_minutes} minutes."
+            f"Maximum booking duration is 3 hours (180 minutes). "
+            f"You selected {total_minutes} minutes."
         )
 
 
 def validate_working_hours(booking_start, booking_end, branch):
     """
-    Checks that booking falls within branch working hours.
-    working_hours format: {"mon": ["09:00", "22:00"], ...}
-    Keys match Python strftime('%a').lower(): mon, tue, wed, thu, fri, sat, sun.
+    booking_start and booking_end must be within branch working hours.
+    working_hours format: {"mon": ["10:00", "22:00"], ...}
     """
-    weekday = booking_start.strftime("%a").lower()
+    weekday       = booking_start.strftime("%a").lower()
     working_hours = branch.working_hours or {}
 
     if weekday not in working_hours:
-        raise ValueError(
-            f"{branch.name} is closed on {booking_start.strftime('%A')}."
-        )
+        raise ValueError(f"{branch.name} is closed on {booking_start.strftime('%A')}.")
 
     work_start_str, work_end_str = working_hours[weekday]
     work_start_t = _parse_time(work_start_str)
     work_end_t   = _parse_time(work_end_str)
 
-    local_tz       = timezone.get_current_timezone()
+    local_tz        = timezone.get_current_timezone()
     booking_start_t = booking_start.astimezone(local_tz).time()
     booking_end_t   = booking_end.astimezone(local_tz).time()
 
@@ -142,85 +175,18 @@ def validate_working_hours(booking_start, booking_end, branch):
         )
     if booking_end_t > work_end_t:
         raise ValueError(
-            f"Booking end time ({booking_end_t.strftime('%H:%M')}) is after closing time ({work_end_str})."
+            f"Booking end ({booking_end_t.strftime('%H:%M')}) "
+            f"is after closing time ({work_end_str})."
         )
 
 
-def validate_booking_hours(booking_start, branch):
-    """
-    Optional: branch may restrict when bookings can START.
-    booking_hours format: {"mon": ["10:00", "20:00"], ...}
-    Empty means no restriction.
-    """
-    weekday = booking_start.strftime("%a").lower()
-    booking_hours = branch.booking_hours or {}
-
-    if not booking_hours or weekday not in booking_hours:
-        return
-
-    book_start_str, book_end_str = booking_hours[weekday]
-    book_start_t = _parse_time(book_start_str)
-    book_end_t   = _parse_time(book_end_str)
-    booking_start_t = booking_start.astimezone(timezone.get_current_timezone()).time()
-
-    if booking_start_t < book_start_t:
-        raise ValueError(
-            f"Bookings on this day start from {book_start_str}."
-        )
-    if booking_start_t >= book_end_t:
-        raise ValueError(
-            f"Bookings on this day are accepted until {book_end_str}."
-        )
-
-
-def validate_cleaning_time(table, booking_start, booking_end, exclude_booking_id=None):
-    """15-minute cleaning gap required between consecutive bookings."""
-    cleaning = timedelta(minutes=15)
-
-    prev_qs = Booking.objects.filter(
-        table=table,
-        status__in=ACTIVE_BOOKING_STATUSES,
-        booking_end__lte=booking_start,
-        booking_end__gt=booking_start - cleaning,
-    )
-    if exclude_booking_id:
-        prev_qs = prev_qs.exclude(id=exclude_booking_id)
-
-    if prev_qs.exists():
-        prev = prev_qs.order_by("-booking_end").first()
-        needed_start = prev.booking_end + cleaning
-        raise ValueError(
-            f"15-minute cleaning time required. "
-            f"Previous booking ends at {prev.booking_end.strftime('%H:%M')}. "
-            f"Earliest available start: {needed_start.strftime('%H:%M')}."
-        )
-
-    next_qs = Booking.objects.filter(
-        table=table,
-        status__in=ACTIVE_BOOKING_STATUSES,
-        booking_start__gte=booking_end,
-        booking_start__lt=booking_end + cleaning,
-    )
-    if exclude_booking_id:
-        next_qs = next_qs.exclude(id=exclude_booking_id)
-
-    if next_qs.exists():
-        nxt = next_qs.order_by("booking_start").first()
-        latest_end = nxt.booking_start - cleaning
-        raise ValueError(
-            f"15-minute cleaning time required. "
-            f"Next booking starts at {nxt.booking_start.strftime('%H:%M')}. "
-            f"Your booking must end by {latest_end.strftime('%H:%M')}."
-        )
-
-
-def validate_booking_time(booking_start, booking_end, branch, table):
+def validate_booking_time(booking_start, booking_end, branch, table=None):
     """Single entry point for all time-related validation."""
     validate_basic_time(booking_start, booking_end)
+    validate_slot_alignment(booking_start, booking_end)
     validate_min_advance(booking_start)
     validate_duration(booking_start, booking_end)
     validate_working_hours(booking_start, booking_end, branch)
-    validate_booking_hours(booking_start, branch)
 
 
 # ============================================================
@@ -231,9 +197,7 @@ def validate_booking_capacity(guest_count, table):
     if guest_count <= 0:
         raise ValueError("Guest count must be greater than 0.")
     if guest_count > table.seats:
-        raise ValueError(
-            f"This table seats {table.seats}. You requested {guest_count}."
-        )
+        raise ValueError(f"This table seats {table.seats}. You requested {guest_count}.")
 
 
 def validate_children_count(children_count, guest_count):
@@ -283,7 +247,93 @@ def validate_cancel_allowed(booking):
 
 
 # ============================================================
-# 6. CREATE BOOKING  ← race condition fixed with select_for_update
+# 6. SLOT GRID — for the booking UI
+# ============================================================
+
+def get_slots_with_status(table, branch, date) -> list[dict]:
+    """
+    Returns all 30-minute slots for the given branch/date, each marked as:
+      - available  (green)
+      - booked     (red — occupied by an active booking)
+      - past       (grey — already passed, cannot book)
+      - closed     (grey — outside working hours)
+
+    Example response item:
+      {"start": "10:00", "end": "10:30", "status": "available", "booking_id": null}
+
+    The frontend uses this to render the slot grid.
+    """
+    local_tz      = timezone.get_current_timezone()
+    now           = timezone.now()
+    cutoff        = now + timedelta(hours=1)   # 1-hour advance rule
+
+    weekday       = date.strftime("%a").lower()
+    working_hours = branch.working_hours or {}
+
+    if weekday not in working_hours:
+        return []
+
+    work_start_str, work_end_str = working_hours[weekday]
+    work_start_t = _parse_time(work_start_str)
+    work_end_t   = _parse_time(work_end_str)
+
+    # Build all 30-min slots from open to close
+    slot_cursor = timezone.make_aware(datetime.combine(date, work_start_t), local_tz)
+    window_end  = timezone.make_aware(datetime.combine(date, work_end_t),   local_tz)
+
+    # Load all active bookings for this table on this date once
+    booked_intervals = list(
+        Booking.objects.filter(
+            table=table,
+            status__in=ACTIVE_BOOKING_STATUSES,
+            booking_start__date=date,
+        ).values("id", "booking_start", "booking_end")
+    )
+
+    slots = []
+    while slot_cursor + timedelta(minutes=30) <= window_end:
+        slot_end = slot_cursor + timedelta(minutes=30)
+
+        # Check if slot is in the past or within the 1-hour advance window
+        if slot_cursor < cutoff:
+            slot_status  = "past"
+            slot_booking = None
+        else:
+            # Check if any active booking overlaps this slot
+            overlapping = None
+            for b in booked_intervals:
+                if slot_cursor < b["booking_end"] and slot_end > b["booking_start"]:
+                    overlapping = b
+                    break
+
+            if overlapping:
+                slot_status  = "booked"
+                slot_booking = overlapping["id"]
+            else:
+                slot_status  = "available"
+                slot_booking = None
+
+        slots.append({
+            "start":      slot_cursor.astimezone(local_tz).strftime("%H:%M"),
+            "end":        slot_end.astimezone(local_tz).strftime("%H:%M"),
+            "status":     slot_status,      # "available" | "booked" | "past"
+            "booking_id": slot_booking,
+        })
+        slot_cursor = slot_end
+
+    return slots
+
+
+def get_available_slots(table, branch, date, duration_minutes: int = 60) -> list[str]:
+    """
+    Simple list of available start times. Used by the old available-slots endpoint.
+    """
+    all_slots = get_slots_with_status(table, branch, date)
+    return [s["start"] for s in all_slots if s["status"] == "available"]
+
+
+# ============================================================
+# 7. CREATE BOOKING
 # ============================================================
 
 @transaction.atomic
@@ -304,8 +354,8 @@ def create_booking(
 ) -> Booking:
     """
     Creates a booking. All business rules are enforced here.
-    select_for_update() locks overlapping booking rows so two simultaneous
-    requests cannot both pass the availability check and create a double booking.
+    select_for_update() prevents double-booking race conditions.
+    Auto-confirms if branch.auto_confirm is True.
     """
     validate_booking_relations(branch, floor, zone, table)
 
@@ -316,28 +366,22 @@ def create_booking(
     validate_booking_capacity(guest_count, table)
     validate_children_count(children_count, guest_count)
 
-    # ── RACE CONDITION FIX ───────────────────────────────────
-    # Lock any existing active bookings for this table that overlap our window.
-    # If two requests arrive simultaneously, the second one blocks here until
-    # the first transaction commits, then re-reads and finds the conflict.
+    # ── RACE CONDITION FIX ────────────────────────────────────
     Booking.objects.select_for_update().filter(
         table=table,
         status__in=ACTIVE_BOOKING_STATUSES,
         booking_start__lt=booking_end,
         booking_end__gt=booking_start,
-    ).exists()  # Forces the lock to be acquired
+    ).exists()
 
-    # Now re-check availability with the lock held
     if not is_table_available(table, booking_start, booking_end):
         conflict = get_overlapping_bookings(table, booking_start, booking_end).first()
         if conflict:
             raise ValueError(
                 f"This table is booked from {conflict.booking_start.strftime('%H:%M')} "
-                f"to {conflict.booking_end.strftime('%H:%M')}. Please choose a different time."
+                f"to {conflict.booking_end.strftime('%H:%M')}. Please choose a different slot."
             )
         raise ValueError("This table is not available at the selected time.")
-
-    validate_cleaning_time(table, booking_start, booking_end)
 
     # One active booking per user at a time
     if Booking.objects.filter(
@@ -351,7 +395,11 @@ def create_booking(
             "Only one booking at a time is allowed."
         )
 
-    initial_status = "pending" if source == "app" else "confirmed"
+    # Auto-confirm if branch is set to auto-confirm OR it's a partner manual booking
+    if branch.auto_confirm or source == "partner_manual":
+        initial_status = "confirmed"
+    else:
+        initial_status = "pending"
 
     booking = Booking.objects.create(
         user=user,
@@ -374,20 +422,23 @@ def create_booking(
         old_status="",
         new_status=initial_status,
         changed_by=created_by_staff or user,
-        note="Booking created",
+        note="Booking created" + (" (auto-confirmed)" if initial_status == "confirmed" else ""),
     )
 
-    # Notifications
+    # Notify guest
     create_notification(
         user=user,
         type=Notification.Type.BOOKING_CREATED,
-        title="Booking created",
+        title="Booking created ✅",
         message=(
-            f"Your booking at {branch.name} for "
-            f"{booking_start.strftime('%d.%m.%Y %H:%M')} has been created."
+            f"Your booking #{booking.booking_number} at {branch.name} "
+            f"for {booking_start.strftime('%d.%m.%Y %H:%M')}–{booking_end.strftime('%H:%M')} "
+            f"has been {'confirmed' if initial_status == 'confirmed' else 'received and is pending confirmation'}."
         ),
-        data={"booking_id": booking.id},
+        data={"booking_id": booking.id, "booking_number": booking.booking_number},
     )
+
+    # Notify branch owner
     if (
         hasattr(branch, "brand")
         and branch.brand
@@ -397,49 +448,109 @@ def create_booking(
         create_notification(
             user=branch.brand.owner,
             type=Notification.Type.BOOKING_CREATED,
-            title="New booking",
+            title="New booking 🔔",
             message=(
-                f"New booking at {branch.name} for "
-                f"{booking_start.strftime('%d.%m.%Y %H:%M')}."
+                f"New booking #{booking.booking_number} at {branch.name} "
+                f"for {booking_start.strftime('%d.%m %H:%M')}–{booking_end.strftime('%H:%M')}. "
+                + ("Auto-confirmed." if initial_status == "confirmed" else "Awaiting your confirmation.")
             ),
-            data={"booking_id": booking.id},
+            data={"booking_id": booking.id, "booking_number": booking.booking_number},
         )
 
     return booking
 
 
 # ============================================================
-# 7. CANCEL BOOKING
+# 8. CHECK-IN BY BOOKING NUMBER
+# ============================================================
+
+@transaction.atomic
+def checkin_by_number(*, booking_number: str, branch, changed_by) -> Booking:
+    """
+    Receptionist enters/scans booking number to check in the guest.
+    Only confirmed bookings at the correct branch can be checked in.
+    """
+    try:
+        booking = Booking.objects.select_for_update().get(
+            booking_number=booking_number.upper().strip()
+        )
+    except Booking.DoesNotExist:
+        raise ValueError(f"No booking found with number #{booking_number}.")
+
+    if booking.branch_id != branch.id:
+        raise ValueError("This booking is not for your branch.")
+
+    if booking.status != "confirmed":
+        if booking.status == "checked_in":
+            raise ValueError("Guest has already checked in.")
+        raise ValueError(
+            f"Cannot check in — booking status is '{booking.status}'. "
+            f"Only confirmed bookings can be checked in."
+        )
+
+    booking.status = "checked_in"
+    booking.save(update_fields=["status", "updated_at"])
+
+    BookingStatusLog.objects.create(
+        booking=booking,
+        old_status="confirmed",
+        new_status="checked_in",
+        changed_by=changed_by,
+        note="Checked in via booking number",
+    )
+
+    create_notification(
+        user=booking.user,
+        type=Notification.Type.BOOKING_CHECKED_IN,
+        title="Welcome! 🎉",
+        message=(
+            f"You have been checked in at {booking.branch.name}. "
+            f"Enjoy your time!"
+        ),
+        data={"booking_id": booking.id, "booking_number": booking.booking_number},
+    )
+
+    return booking
+
+
+# ============================================================
+# 9. CANCEL BOOKING
 # ============================================================
 
 @transaction.atomic
 def cancel_booking(*, booking: Booking, changed_by, note: str = "") -> Booking:
     validate_cancel_allowed(booking)
 
-    old_status    = booking.status
+    old_status     = booking.status
     booking.status = "canceled"
-    booking.save(update_fields=["status", "updated_at"])
+    if note:
+        booking.cancel_reason = note
+    booking.save(update_fields=["status", "cancel_reason", "updated_at"])
 
     BookingStatusLog.objects.create(
         booking=booking,
         old_status=old_status,
         new_status="canceled",
         changed_by=changed_by,
-        note=note or "Cancelled by user",
+        note=note or "Cancelled",
     )
 
     create_notification(
         user=booking.user,
         type=Notification.Type.BOOKING_CANCELED,
-        title="Booking cancelled",
-        message="Your booking has been cancelled." + (f" Reason: {note}" if note else ""),
-        data={"booking_id": booking.id},
+        title="Booking cancelled ❌",
+        message=(
+            f"Your booking #{booking.booking_number} at {booking.branch.name} "
+            f"has been cancelled."
+            + (f" Reason: {note}" if note else "")
+        ),
+        data={"booking_id": booking.id, "booking_number": booking.booking_number},
     )
     return booking
 
 
 # ============================================================
-# 8. UPDATE STATUS
+# 10. UPDATE STATUS (partner use)
 # ============================================================
 
 @transaction.atomic
@@ -450,7 +561,12 @@ def update_booking_status(
 
     old_status     = booking.status
     booking.status = new_status
-    booking.save(update_fields=["status", "updated_at"])
+
+    # Store cancel reason if status is becoming 'canceled'
+    if new_status == "canceled" and note:
+        booking.cancel_reason = note
+
+    booking.save(update_fields=["status", "cancel_reason", "updated_at"])
 
     BookingStatusLog.objects.create(
         booking=booking,
@@ -460,31 +576,39 @@ def update_booking_status(
         note=note,
     )
 
-    _send_status_notification(booking, new_status)
+    _send_status_notification(booking, new_status, note)
     return booking
 
 
-def _send_status_notification(booking: Booking, new_status: str):
+def _send_status_notification(booking: Booking, new_status: str, note: str = ""):
     _map = {
         "confirmed": (
             Notification.Type.BOOKING_CONFIRMED,
-            "Booking confirmed",
-            f"Table #{booking.table.name}, {booking.booking_start.strftime('%H:%M')}.",
+            "Booking confirmed ✅",
+            f"Booking #{booking.booking_number} at {booking.branch.name} "
+            f"on {booking.booking_start.strftime('%d.%m %H:%M')} has been confirmed.",
         ),
         "checked_in": (
             Notification.Type.BOOKING_CHECKED_IN,
-            "Welcome!",
-            "Your booking has been activated.",
+            "Welcome! 🎉",
+            f"You have checked in at {booking.branch.name}. Enjoy your time!",
         ),
         "completed": (
             Notification.Type.BOOKING_COMPLETED,
-            "Booking completed",
-            "Thank you for visiting us!",
+            "Visit completed 🙏",
+            f"Thank you for visiting {booking.branch.name}!",
+        ),
+        "canceled": (
+            Notification.Type.BOOKING_CANCELED,
+            "Booking cancelled ❌",
+            f"Booking #{booking.booking_number} has been cancelled."
+            + (f" Reason: {note}" if note else ""),
         ),
         "no_show": (
             Notification.Type.BOOKING_NO_SHOW,
             "No-show recorded",
-            "You did not arrive for your booking. The booking has been closed.",
+            f"You did not arrive for booking #{booking.booking_number}. "
+            f"The booking has been closed.",
         ),
     }
     if new_status not in _map:
@@ -495,119 +619,40 @@ def _send_status_notification(booking: Booking, new_status: str):
         type=notif_type,
         title=title,
         message=message,
-        data={"booking_id": booking.id},
+        data={"booking_id": booking.id, "booking_number": booking.booking_number},
     )
 
 
 # ============================================================
-# 9. AVAILABLE SLOTS ENDPOINT HELPER
+# 11. NO-SHOW AUTO-TIMER (called by a periodic task or endpoint)
 # ============================================================
 
-def get_available_slots(
-    table,
-    branch,
-    date,
-    duration_minutes: int = 60,
-) -> list[str]:
+def get_no_show_grace_minutes(booking: Booking) -> int:
     """
-    Returns a list of available start times (HH:MM) for a given table and date.
-    Used by the available-slots endpoint.
+    Returns how many minutes after booking_start the venue can mark no-show.
+    Rules:
+      - Booking duration 30 min  → grace 10 min
+      - Booking duration 60 min  → grace 20 min
+      - Booking duration > 60 min → grace 30 min
     """
-    from datetime import date as date_type
-
-    local_tz  = timezone.get_current_timezone()
-    cleaning  = timedelta(minutes=15)
-    duration  = timedelta(minutes=duration_minutes)
-    now       = timezone.now()
-
-    # Determine operating window from working_hours
-    weekday       = date.strftime("%a").lower()
-    working_hours = branch.working_hours or {}
-
-    if weekday not in working_hours:
-        return []  # Branch closed on this day
-
-    work_start_str, work_end_str = working_hours[weekday]
-    work_start_t = _parse_time(work_start_str)
-    work_end_t   = _parse_time(work_end_str)
-
-    # Build candidate datetimes every 30 minutes
-    slot_start = timezone.make_aware(
-        datetime.combine(date, work_start_t), local_tz
+    duration_minutes = int(
+        (booking.booking_end - booking.booking_start).total_seconds() // 60
     )
-    window_end = timezone.make_aware(
-        datetime.combine(date, work_end_t), local_tz
-    )
-
-    # Enforce 2-hour advance booking rule
-    earliest_allowed = now + timedelta(hours=2)
-    if slot_start < earliest_allowed:
-        # Round up to next 30-min mark
-        minutes_diff = int((earliest_allowed - slot_start).total_seconds() // 60)
-        rounded_up   = ((minutes_diff + 29) // 30) * 30
-        slot_start   = slot_start + timedelta(minutes=rounded_up)
-
-    # Load all active bookings for this table on this date once
-    bookings = list(
-        Booking.objects.filter(
-            table=table,
-            status__in=ACTIVE_BOOKING_STATUSES,
-            booking_start__date=date,
-        ).order_by("booking_start")
-    )
-
-    available = []
-    candidate = slot_start
-
-    while candidate + duration <= window_end:
-        candidate_end = candidate + duration
-
-        # Check overlap with any existing booking (including cleaning buffer)
-        conflict = False
-        for b in bookings:
-            # Booking is considered occupied if within cleaning distance
-            if candidate < b.booking_end + cleaning and candidate_end > b.booking_start - cleaning:
-                # Jump past this booking
-                candidate = b.booking_end + cleaning
-                conflict  = True
-                break
-
-        if not conflict:
-            available.append(candidate.astimezone(local_tz).strftime("%H:%M"))
-            candidate += timedelta(minutes=30)
-
-    return available
+    if duration_minutes <= 30:
+        return 10
+    elif duration_minutes <= 60:
+        return 20
+    else:
+        return 30
 
 
-def get_next_available_slot(table, start_time, duration_minutes: int = 60):
-    """Returns the next free slot start time for a table from start_time onwards."""
-    cleaning = timedelta(minutes=15)
-    duration = timedelta(minutes=duration_minutes)
-
-    bookings = (
-        Booking.objects.filter(
-            table=table,
-            status__in=ACTIVE_BOOKING_STATUSES,
-            booking_end__gte=start_time,
-        ).order_by("booking_start")
-    )
-
-    candidate = start_time
-    for b in bookings:
-        if candidate + duration <= b.booking_start - cleaning:
-            return candidate
-        candidate = b.booking_end + cleaning
-
-    return candidate
-
-
-def can_extend_booking(booking: Booking, new_end) -> bool:
-    if booking.status not in ["confirmed", "checked_in"]:
-        raise ValueError(f"Cannot extend a booking with status '{booking.status}'.")
-    if new_end <= booking.booking_end:
-        raise ValueError("New end time must be after current end time.")
-    if not is_table_available(
-        booking.table, booking.booking_end, new_end, exclude_booking_id=booking.id
-    ):
-        raise ValueError("Table is occupied after your current booking ends.")
-    return True
+def can_mark_no_show(booking: Booking) -> bool:
+    """
+    Returns True if the booking can be marked no-show now.
+    Requires: status=confirmed AND grace period has passed.
+    """
+    if booking.status != "confirmed":
+        return False
+    grace     = timedelta(minutes=get_no_show_grace_minutes(booking))
+    threshold = booking.booking_start + grace
+    return timezone.now() >= threshold

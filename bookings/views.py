@@ -1,6 +1,7 @@
 import logging
 from datetime import date as date_type
 
+from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime, parse_date
 from rest_framework import generics, permissions, status
@@ -11,19 +12,25 @@ from rest_framework.views import APIView
 from accounts.models import User
 from tables.models import Table
 
-from .models import Booking
+from .models import Booking, Message
 from .permissions import IsPartnerBookingViewer, can_manage_branch_bookings
 from .serializers import (
     BookingCancelSerializer,
     BookingDetailSerializer,
     BookingListSerializer,
     BookingStatusUpdateSerializer,
+    CheckInByNumberSerializer,
     ConsumerBookingCreateSerializer,
+    MessageSerializer,
     PartnerManualBookingCreateSerializer,
+    SendMessageSerializer,
 )
 from .services import (
     ACTIVE_BOOKING_STATUSES,
     cancel_booking,
+    can_mark_no_show,
+    checkin_by_number,
+    get_slots_with_status,
     get_available_slots,
     update_booking_status,
 )
@@ -34,9 +41,9 @@ logger = logging.getLogger(__name__)
 # ── Pagination ───────────────────────────────────────────────
 
 class BookingPagination(PageNumberPagination):
-    page_size            = 20
+    page_size             = 20
     page_size_query_param = "page_size"
-    max_page_size        = 100
+    max_page_size         = 100
 
 
 # ── Consumer ─────────────────────────────────────────────────
@@ -55,14 +62,12 @@ class MyBookingListView(generics.ListAPIView):
             .select_related("user", "branch", "floor", "zone", "table")
         )
 
-        # Filter: ?upcoming=true shows only future active bookings
         upcoming = self.request.query_params.get("upcoming")
         if upcoming == "true":
             qs = qs.filter(
                 booking_start__gte=timezone.now(),
                 status__in=["pending", "confirmed"],
             )
-        # Filter: ?past=true shows only completed/canceled/no_show
         elif self.request.query_params.get("past") == "true":
             qs = qs.filter(status__in=["completed", "canceled", "no_show"])
 
@@ -79,8 +84,7 @@ class MyBookingDetailView(generics.RetrieveAPIView):
         return (
             Booking.objects.filter(user=self.request.user)
             .select_related("user", "branch", "floor", "zone", "table")
-            # prefetch status_logs AND the user who changed them — prevents N+1
-            .prefetch_related("status_logs__changed_by")
+            .prefetch_related("status_logs__changed_by", "messages__sender")
         )
 
 
@@ -95,7 +99,12 @@ class ConsumerBookingCreateView(generics.CreateAPIView):
         try:
             booking = s.save()
             return Response(
-                {"detail": "Booking created successfully.", "booking_id": booking.id},
+                {
+                    "detail": "Booking created successfully.",
+                    "booking_id":     booking.id,
+                    "booking_number": booking.booking_number,
+                    "status":         booking.status,
+                },
                 status=status.HTTP_201_CREATED,
             )
         except Exception:
@@ -126,15 +135,71 @@ class MyBookingCancelView(APIView):
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-# ── Available slots (medium priority — high UX value) ────────
+# ── Slot grid (new — green/red availability) ─────────────────
+
+class TableSlotsView(APIView):
+    """
+    GET /api/bookings/slots/
+        ?table_id=4&date=2026-06-15
+
+    Returns all 30-minute slots for the given table and date with their status:
+      - available  → green
+      - booked     → red
+      - past       → grey (within 1-hour advance window or already past)
+
+    Consumer-facing, no auth required.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        table_id = request.query_params.get("table_id")
+        date_str = request.query_params.get("date")
+
+        if not all([table_id, date_str]):
+            return Response(
+                {"detail": "table_id and date are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        target_date = parse_date(date_str)
+        if not target_date:
+            return Response(
+                {"detail": "Invalid date format. Use YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        table = (
+            Table.objects.filter(id=table_id, is_active=True)
+            .select_related("branch")
+            .first()
+        )
+        if not table:
+            return Response(
+                {"detail": "Table not found or not active."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        slots = get_slots_with_status(
+            table=table,
+            branch=table.branch,
+            date=target_date,
+        )
+        return Response({
+            "date":     date_str,
+            "table_id": int(table_id),
+            "slots":    slots,
+        })
+
+
+# ── Available slots (legacy, kept for backward compat) ───────
 
 class AvailableSlotsView(APIView):
     """
     GET /api/bookings/available-slots/
         ?branch_id=1&table_id=4&date=2026-06-15&duration=60
 
-    Returns a list of available start times for a given table and date.
-    Consumer-facing, no auth required.
+    Returns available start times only (no red/green grid).
+    Use /api/bookings/slots/ for the full slot grid.
     """
     permission_classes = [permissions.AllowAny]
 
@@ -159,11 +224,11 @@ class AvailableSlotsView(APIView):
 
         try:
             duration_minutes = int(duration)
-            if duration_minutes < 30 or duration_minutes > 240:
+            if duration_minutes < 30 or duration_minutes > 180:
                 raise ValueError()
         except (ValueError, TypeError):
             return Response(
-                {"detail": "duration must be an integer between 30 and 240."},
+                {"detail": "duration must be an integer between 30 and 180."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -195,7 +260,6 @@ def _partner_booking_qs(user):
         return qs
     if user.role == User.Role.OWNER:
         return qs.filter(branch__brand__owner=user)
-    # Manager / Receptionist — only their assigned branch
     return qs.filter(branch=user.branch)
 
 
@@ -240,7 +304,7 @@ class PartnerBookingDetailView(generics.RetrieveAPIView):
             return Booking.objects.none()
         return (
             _partner_booking_qs(self.request.user)
-            .prefetch_related("status_logs__changed_by")
+            .prefetch_related("status_logs__changed_by", "messages__sender")
         )
 
 
@@ -255,7 +319,12 @@ class PartnerManualBookingCreateView(generics.CreateAPIView):
         try:
             booking = s.save()
             return Response(
-                {"detail": "Manual booking created.", "booking_id": booking.id},
+                {
+                    "detail": "Manual booking created.",
+                    "booking_id":     booking.id,
+                    "booking_number": booking.booking_number,
+                    "status":         booking.status,
+                },
                 status=status.HTTP_201_CREATED,
             )
         except Exception:
@@ -288,6 +357,101 @@ class PartnerBookingStatusUpdateView(APIView):
                 note=s.validated_data.get("note", ""),
             )
             return Response({"detail": "Status updated."})
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PartnerCheckInByNumberView(APIView):
+    """
+    POST /api/bookings/partner/checkin/
+    Body: {"booking_number": "A3X9K2"}
+
+    Receptionist scans/enters the booking number to check in the guest.
+    Status changes from confirmed → checked_in.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsPartnerBookingViewer]
+
+    def post(self, request):
+        s = CheckInByNumberSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+
+        # Determine the branch for this staff member
+        user = request.user
+        if user.role in [User.Role.MANAGER, User.Role.RECEPTIONIST]:
+            if not user.branch:
+                return Response(
+                    {"detail": "Your account is not assigned to a branch."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            branch = user.branch
+        else:
+            # Owner/SuperAdmin — must pass branch_id
+            branch_id = request.data.get("branch_id")
+            if not branch_id:
+                return Response(
+                    {"detail": "branch_id is required for owner/admin check-in."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            from restaurants.models import Branch
+            branch = Branch.objects.filter(id=branch_id).first()
+            if not branch:
+                return Response({"detail": "Branch not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            booking = checkin_by_number(
+                booking_number=s.validated_data["booking_number"],
+                branch=branch,
+                changed_by=user,
+            )
+            return Response({
+                "detail": "Guest checked in successfully.",
+                "booking_id":     booking.id,
+                "booking_number": booking.booking_number,
+                "guest":          f"{booking.user.first_name} {booking.user.last_name}".strip() or booking.user.phone,
+                "table":          booking.table.name,
+            })
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PartnerMarkNoShowView(APIView):
+    """
+    POST /api/bookings/partner/<pk>/no-show/
+
+    Marks a booking as no-show if the grace period has passed.
+    """
+    permission_classes = [permissions.IsAuthenticated, IsPartnerBookingViewer]
+
+    def post(self, request, pk):
+        booking = (
+            Booking.objects.select_related("branch__brand").filter(pk=pk).first()
+        )
+        if not booking:
+            return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not can_manage_branch_bookings(request.user, booking.branch):
+            return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+
+        if not can_mark_no_show(booking):
+            from .services import get_no_show_grace_minutes
+            grace = get_no_show_grace_minutes(booking)
+            return Response(
+                {
+                    "detail": (
+                        f"Cannot mark no-show yet. Grace period is {grace} minutes "
+                        f"after booking start ({booking.booking_start.strftime('%H:%M')})."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            update_booking_status(
+                booking=booking,
+                new_status="no_show",
+                changed_by=request.user,
+                note=request.data.get("note", ""),
+            )
+            return Response({"detail": "Booking marked as no-show."})
         except ValueError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -348,3 +512,117 @@ class PartnerOccupiedTablesView(APIView):
             for t in tables_qs
         ]
         return Response(data)
+
+
+# ── Chat / Messages ───────────────────────────────────────────
+
+class BookingMessageListView(generics.ListAPIView):
+    """
+    GET /api/bookings/<pk>/messages/
+
+    Returns all messages for a booking. Accessible by:
+    - The guest (booking.user)
+    - Partner staff for that branch
+    """
+    serializer_class   = MessageSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        booking_pk = self.kwargs["pk"]
+        user       = self.request.user
+
+        # Determine access
+        booking = Booking.objects.filter(pk=booking_pk).select_related("branch__brand").first()
+        if not booking:
+            return Message.objects.none()
+
+        is_guest   = booking.user_id == user.id
+        is_partner = can_manage_branch_bookings(user, booking.branch)
+        if not is_guest and not is_partner:
+            return Message.objects.none()
+
+        # Mark messages from the other side as read
+        if is_guest:
+            Message.objects.filter(booking=booking, is_read=False).exclude(sender=user).update(is_read=True)
+        elif is_partner:
+            Message.objects.filter(booking=booking, is_read=False, sender=booking.user).update(is_read=True)
+
+        return Message.objects.filter(booking=booking).select_related("sender")
+
+
+class BookingMessageCreateView(APIView):
+    """
+    POST /api/bookings/<pk>/messages/
+    Body: {"text": "..."}
+
+    Send a message in a booking's chat.
+    Accessible by the guest and partner staff.
+    Real-time delivery via WebSocket (see chat/consumers.py).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        booking = Booking.objects.filter(pk=pk).select_related("branch__brand", "user").first()
+        if not booking:
+            return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        user       = request.user
+        is_guest   = booking.user_id == user.id
+        is_partner = can_manage_branch_bookings(user, booking.branch)
+
+        if not is_guest and not is_partner:
+            return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+
+        if booking.status in ["completed", "canceled", "no_show"]:
+            return Response(
+                {"detail": "Cannot send messages for a closed booking."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        s = SendMessageSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            message = Message.objects.create(
+                booking=booking,
+                sender=user,
+                text=s.validated_data["text"],
+            )
+
+        # Notify recipient
+        recipient = booking.branch.brand.owner if is_guest else booking.user
+        if recipient and recipient != user:
+            create_notification_for_message(booking, message, sender=user, recipient=recipient)
+
+        # Broadcast via WebSocket channel layer (non-blocking)
+        try:
+            from channels.layers import get_channel_layer
+            from asgiref.sync import async_to_sync
+            channel_layer = get_channel_layer()
+            if channel_layer:
+                async_to_sync(channel_layer.group_send)(
+                    f"booking_chat_{booking.id}",
+                    {
+                        "type":    "chat_message",
+                        "message": MessageSerializer(message).data,
+                    },
+                )
+        except Exception:
+            pass  # WebSocket broadcast is best-effort; REST response always succeeds
+
+        return Response(MessageSerializer(message).data, status=status.HTTP_201_CREATED)
+
+
+def create_notification_for_message(booking, message, sender, recipient):
+    """Send a push notification for a new chat message."""
+    from notifications.services import create_notification
+    from notifications.models import Notification
+
+    sender_name = f"{sender.first_name} {sender.last_name}".strip() or sender.phone or "User"
+    create_notification(
+        user=recipient,
+        type=Notification.Type.SYSTEM,
+        title=f"New message 💬",
+        message=f"{sender_name}: {message.text[:80]}",
+        data={"booking_id": booking.id, "booking_number": booking.booking_number},
+    )

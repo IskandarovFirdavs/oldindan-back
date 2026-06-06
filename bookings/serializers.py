@@ -4,7 +4,7 @@ from restaurants.models import Branch
 from layouts.models import Floor, Zone
 from tables.models import Table
 
-from .models import Booking, BookingStatusLog
+from .models import Booking, BookingStatusLog, Message
 from .permissions import can_create_manual_booking
 from .services import (
     create_booking,
@@ -13,7 +13,6 @@ from .services import (
     validate_booking_capacity,
     validate_booking_relations,
     validate_booking_time,
-    validate_cleaning_time,
 )
 
 
@@ -32,25 +31,43 @@ class BookingStatusLogSerializer(serializers.ModelSerializer):
         return obj.changed_by.first_name or obj.changed_by.phone or obj.changed_by.email
 
 
+# ── Message ──────────────────────────────────────────────────
+
+class MessageSerializer(serializers.ModelSerializer):
+    sender_name  = serializers.SerializerMethodField()
+    sender_role  = serializers.CharField(source="sender.role", read_only=True)
+
+    class Meta:
+        model  = Message
+        fields = ["id", "booking", "sender", "sender_name", "sender_role", "text", "is_read", "created_at"]
+        read_only_fields = ["id", "sender", "booking", "is_read", "created_at"]
+
+    def get_sender_name(self, obj):
+        u = obj.sender
+        return f"{u.first_name} {u.last_name}".strip() or u.phone or "User"
+
+
 # ── List / detail ────────────────────────────────────────────
 
 class BookingListSerializer(serializers.ModelSerializer):
-    branch_name = serializers.CharField(source="branch.name", read_only=True)
-    floor_name  = serializers.CharField(source="floor.name",  read_only=True)
-    zone_name   = serializers.CharField(source="zone.name",   read_only=True, allow_null=True)
-    table_name  = serializers.CharField(source="table.name",  read_only=True)
-    user_name   = serializers.SerializerMethodField()
-    user_phone  = serializers.CharField(source="user.phone",  read_only=True)
+    branch_name    = serializers.CharField(source="branch.name",  read_only=True)
+    floor_name     = serializers.CharField(source="floor.name",   read_only=True)
+    zone_name      = serializers.CharField(source="zone.name",    read_only=True, allow_null=True)
+    table_name     = serializers.CharField(source="table.name",   read_only=True)
+    user_name      = serializers.SerializerMethodField()
+    user_phone     = serializers.CharField(source="user.phone",   read_only=True)
 
     class Meta:
         model  = Booking
         fields = [
-            "id", "user", "user_name", "user_phone",
+            "id", "booking_number",
+            "user", "user_name", "user_phone",
             "branch", "branch_name", "floor", "floor_name",
             "zone", "zone_name", "table", "table_name",
             "guest_count", "children_count",
             "booking_start", "booking_end",
-            "status", "source", "special_request", "created_at",
+            "status", "source", "special_request", "cancel_reason",
+            "created_at",
         ]
 
     def get_user_name(self, obj):
@@ -58,36 +75,34 @@ class BookingListSerializer(serializers.ModelSerializer):
 
 
 class BookingDetailSerializer(BookingListSerializer):
-    # status_logs__changed_by is prefetched in views via prefetch_related
     status_logs = BookingStatusLogSerializer(many=True, read_only=True)
+    messages    = MessageSerializer(many=True, read_only=True)
 
     class Meta(BookingListSerializer.Meta):
-        fields = BookingListSerializer.Meta.fields + ["status_logs"]
+        fields = BookingListSerializer.Meta.fields + ["status_logs", "messages"]
 
 
 # ── Consumer create ──────────────────────────────────────────
 
 class ConsumerBookingCreateSerializer(serializers.Serializer):
-    branch        = serializers.PrimaryKeyRelatedField(queryset=Branch.objects.filter(is_active=True))
-    floor         = serializers.PrimaryKeyRelatedField(queryset=Floor.objects.filter(is_active=True))
-    zone          = serializers.PrimaryKeyRelatedField(
+    branch         = serializers.PrimaryKeyRelatedField(queryset=Branch.objects.filter(is_active=True))
+    floor          = serializers.PrimaryKeyRelatedField(queryset=Floor.objects.filter(is_active=True))
+    zone           = serializers.PrimaryKeyRelatedField(
         queryset=Zone.objects.filter(is_active=True), required=False, allow_null=True,
     )
-    table         = serializers.PrimaryKeyRelatedField(queryset=Table.objects.filter(is_active=True))
-    guest_count   = serializers.IntegerField(min_value=1)
+    table          = serializers.PrimaryKeyRelatedField(queryset=Table.objects.filter(is_active=True))
+    guest_count    = serializers.IntegerField(min_value=1)
     children_count = serializers.IntegerField(min_value=0, default=0)
-    booking_start = serializers.DateTimeField()
-    booking_end   = serializers.DateTimeField()
+    booking_start  = serializers.DateTimeField()
+    booking_end    = serializers.DateTimeField()
     special_request = serializers.CharField(required=False, allow_blank=True)
 
     def validate(self, attrs):
-        # Children count
         if attrs.get("children_count", 0) > attrs["guest_count"] * 3:
             raise serializers.ValidationError(
                 {"children_count": "Children count cannot exceed 3× the number of guests."}
             )
 
-        # All business rules come from services.py — no duplication
         try:
             validate_booking_relations(
                 branch=attrs["branch"],
@@ -121,14 +136,7 @@ class ConsumerBookingCreateSerializer(serializers.Serializer):
                 f"{b.booking_start.strftime('%H:%M')}–{b.booking_end.strftime('%H:%M')}"
                 for b in overlapping
             ]
-            raise serializers.ValidationError(
-                f"Table is booked during: {', '.join(times)}"
-            )
-
-        try:
-            validate_cleaning_time(attrs["table"], attrs["booking_start"], attrs["booking_end"])
-        except ValueError as e:
-            raise serializers.ValidationError(str(e))
+            raise serializers.ValidationError(f"Table is booked during: {', '.join(times)}")
 
         # User parallel bookings check
         if Booking.objects.filter(
@@ -163,17 +171,17 @@ class ConsumerBookingCreateSerializer(serializers.Serializer):
 # ── Partner manual create ────────────────────────────────────
 
 class PartnerManualBookingCreateSerializer(serializers.Serializer):
-    user          = serializers.IntegerField(required=False, allow_null=True)
-    branch        = serializers.PrimaryKeyRelatedField(queryset=Branch.objects.all())
-    floor         = serializers.PrimaryKeyRelatedField(queryset=Floor.objects.all())
-    zone          = serializers.PrimaryKeyRelatedField(
+    user           = serializers.IntegerField(required=False, allow_null=True)
+    branch         = serializers.PrimaryKeyRelatedField(queryset=Branch.objects.all())
+    floor          = serializers.PrimaryKeyRelatedField(queryset=Floor.objects.all())
+    zone           = serializers.PrimaryKeyRelatedField(
         queryset=Zone.objects.all(), required=False, allow_null=True,
     )
-    table         = serializers.PrimaryKeyRelatedField(queryset=Table.objects.all())
-    guest_count   = serializers.IntegerField(min_value=1)
+    table          = serializers.PrimaryKeyRelatedField(queryset=Table.objects.all())
+    guest_count    = serializers.IntegerField(min_value=1)
     children_count = serializers.IntegerField(min_value=0, default=0)
-    booking_start = serializers.DateTimeField()
-    booking_end   = serializers.DateTimeField()
+    booking_start  = serializers.DateTimeField()
+    booking_end    = serializers.DateTimeField()
     special_request = serializers.CharField(required=False, allow_blank=True)
 
     def validate_branch(self, value):
@@ -188,7 +196,6 @@ class PartnerManualBookingCreateSerializer(serializers.Serializer):
 
         request = self.context["request"]
 
-        # Resolve guest user
         if attrs.get("user"):
             try:
                 attrs["user_obj"] = User.objects.get(id=attrs["user"])
@@ -235,16 +242,8 @@ class PartnerManualBookingCreateSerializer(serializers.Serializer):
                 f"{b.booking_start.strftime('%H:%M')}–{b.booking_end.strftime('%H:%M')}"
                 for b in overlapping
             ]
-            raise serializers.ValidationError(
-                f"Table is booked during: {', '.join(times)}"
-            )
+            raise serializers.ValidationError(f"Table is booked during: {', '.join(times)}")
 
-        try:
-            validate_cleaning_time(attrs["table"], attrs["booking_start"], attrs["booking_end"])
-        except ValueError as e:
-            raise serializers.ValidationError(str(e))
-
-        # FIXED: check the GUEST's bookings, not the staff member's
         guest = attrs["user_obj"]
         if Booking.objects.filter(
             user=guest,
@@ -286,11 +285,21 @@ class BookingStatusUpdateSerializer(serializers.Serializer):
     status = serializers.ChoiceField(
         choices=["pending", "confirmed", "checked_in", "completed", "canceled", "no_show"]
     )
-    note = serializers.CharField(required=False, allow_blank=True)
+    note   = serializers.CharField(required=False, allow_blank=True)
+
+
+class CheckInByNumberSerializer(serializers.Serializer):
+    booking_number = serializers.CharField(max_length=6, min_length=6)
 
 
 class OccupiedTableSerializer(serializers.Serializer):
-    table_id   = serializers.IntegerField()
+    table_id    = serializers.IntegerField()
     is_occupied = serializers.BooleanField()
-    booking_id = serializers.IntegerField(allow_null=True)
-    status     = serializers.CharField(allow_null=True)
+    booking_id  = serializers.IntegerField(allow_null=True)
+    status      = serializers.CharField(allow_null=True)
+
+
+# ── Send message serializer ──────────────────────────────────
+
+class SendMessageSerializer(serializers.Serializer):
+    text = serializers.CharField(max_length=2000)

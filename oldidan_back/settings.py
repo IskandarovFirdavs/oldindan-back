@@ -38,6 +38,8 @@ INSTALLED_APPS = [
     'drf_yasg',
     "rest_framework",
     "rest_framework_simplejwt",
+    "channels",
+
     
     "accounts",
     "restaurants",
@@ -45,6 +47,7 @@ INSTALLED_APPS = [
     "tables",
     "bookings",
     "notifications",
+    "chat",
 ]
 
 MIDDLEWARE = [

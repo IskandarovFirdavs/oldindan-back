@@ -9,16 +9,25 @@ from restaurants.models import Branch
 
 
 class UserSerializer(serializers.ModelSerializer):
+    full_name   = serializers.CharField(read_only=True)
+    branch_name = serializers.CharField(source="branch.name", read_only=True, allow_null=True)
+
     class Meta:
-        model = User
-        fields = ["id", "phone", "email", "first_name", "last_name", "bio", "avatar", "role", "branch",
-                  "is_phone_verified", "is_email_verified"]
-        read_only_fields = ["id", "role", "is_phone_verified", "is_email_verified"]
+        model  = User
+        fields = [
+            "id", "phone", "email",
+            "first_name", "last_name", "full_name",
+            "bio", "avatar", "role",
+            "branch", "branch_name",
+            "is_phone_verified", "is_email_verified",
+        ]
+        read_only_fields = [
+            "id", "role", "is_phone_verified", "is_email_verified", "full_name", "branch_name",
+        ]
 
 
-# ------------------------------
-# CONSUMER
-# ------------------------------
+# ── Consumer OTP request ─────────────────────────────────────
+
 class ConsumerRequestRegisterOTPSerializer(serializers.Serializer):
     phone = serializers.CharField()
 
@@ -33,12 +42,14 @@ class ConsumerRequestRegisterOTPSerializer(serializers.Serializer):
         return otp
 
 
+# ── Consumer register ─────────────────────────────────────────
+
 class ConsumerRegisterSerializer(serializers.Serializer):
-    phone = serializers.CharField()
-    code = serializers.CharField(max_length=6)
-    first_name = serializers.CharField()
-    last_name = serializers.CharField()
-    password = serializers.CharField(write_only=True, min_length=8)
+    phone           = serializers.CharField()
+    code            = serializers.CharField(max_length=6)
+    first_name      = serializers.CharField()
+    last_name       = serializers.CharField()
+    password        = serializers.CharField(write_only=True, min_length=8)
     password_repeat = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
@@ -66,12 +77,18 @@ class ConsumerRegisterSerializer(serializers.Serializer):
         )
 
 
+# ── Consumer login ────────────────────────────────────────────
+
 class ConsumerLoginSerializer(serializers.Serializer):
-    phone = serializers.CharField()
+    phone    = serializers.CharField()
     password = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
-        user = authenticate(request=self.context.get("request"), phone=attrs["phone"], password=attrs["password"])
+        user = authenticate(
+            request=self.context.get("request"),
+            phone=attrs["phone"],
+            password=attrs["password"],
+        )
         if not user:
             raise serializers.ValidationError("Invalid phone or password.")
         if not user.is_active:
@@ -79,6 +96,8 @@ class ConsumerLoginSerializer(serializers.Serializer):
         attrs["user"] = user
         return attrs
 
+
+# ── Consumer forgot password ──────────────────────────────────
 
 class ConsumerForgotPasswordRequestSerializer(serializers.Serializer):
     phone = serializers.CharField()
@@ -95,38 +114,35 @@ class ConsumerForgotPasswordRequestSerializer(serializers.Serializer):
 
 
 class ConsumerForgotPasswordConfirmSerializer(serializers.Serializer):
-    phone = serializers.CharField()
-    code = serializers.CharField(max_length=6)
-    new_password = serializers.CharField(write_only=True, min_length=8)
+    phone              = serializers.CharField()
+    code               = serializers.CharField(max_length=6)
+    new_password       = serializers.CharField(write_only=True, min_length=8)
     new_password_repeat = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
         if attrs["new_password"] != attrs["new_password_repeat"]:
             raise serializers.ValidationError({"new_password_repeat": "Passwords do not match."})
         try:
-            otp = verify_otp(attrs["phone"], attrs["code"], TelegramOTP.Purpose.RESET_PASSWORD)
+            verify_otp(attrs["phone"], attrs["code"], TelegramOTP.Purpose.RESET_PASSWORD)
         except ValueError as e:
             raise serializers.ValidationError({"code": str(e)})
-        attrs["otp_obj"] = otp
         return attrs
 
     @transaction.atomic
     def save(self, **kwargs):
-        otp = self.validated_data["otp_obj"]
         user = User.objects.get(phone=self.validated_data["phone"], role=User.Role.CONSUMER)
         user.set_password(self.validated_data["new_password"])
         user.save(update_fields=["password"])
         return user
 
 
-# ------------------------------
-# OWNER (email only, no phone required)
-# ------------------------------
+# ── Owner register ────────────────────────────────────────────
+
 class OwnerRegisterSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    first_name = serializers.CharField()
-    last_name = serializers.CharField()
-    password = serializers.CharField(write_only=True, min_length=8)
+    email           = serializers.EmailField()
+    first_name      = serializers.CharField()
+    last_name       = serializers.CharField()
+    password        = serializers.CharField(write_only=True, min_length=8)
     password_repeat = serializers.CharField(write_only=True)
 
     def validate_email(self, value):
@@ -152,15 +168,15 @@ class OwnerRegisterSerializer(serializers.Serializer):
         )
 
 
+# ── Owner login ───────────────────────────────────────────────
+
 class OwnerLoginSerializer(serializers.Serializer):
-    email = serializers.EmailField()
+    email    = serializers.EmailField()
     password = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
         user = User.objects.filter(email=attrs["email"]).first()
-        if not user:
-            raise serializers.ValidationError("Invalid email or password.")
-        if not user.check_password(attrs["password"]):
+        if not user or not user.check_password(attrs["password"]):
             raise serializers.ValidationError("Invalid email or password.")
         if not user.is_active:
             raise serializers.ValidationError("User is inactive.")
@@ -169,6 +185,12 @@ class OwnerLoginSerializer(serializers.Serializer):
         attrs["user"] = user
         return attrs
 
+
+# ── Owner forgot password ─────────────────────────────────────
+# BUG FIXED: original code called otp.phone on an OTP created with an email
+# as the "phone" field, which is semantically wrong and would break if
+# send_sms_code ever tried to format/validate the phone number.
+# Owners use email — password reset must be via email, not SMS.
 
 class OwnerForgotPasswordRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
@@ -179,46 +201,53 @@ class OwnerForgotPasswordRequestSerializer(serializers.Serializer):
         return value
 
     def create(self, validated_data):
+        # OTP is keyed by email (stored in the `phone` field of TelegramOTP)
+        # This is an intentional reuse of the phone field for email-based OTP.
+        # The code is sent via email — NOT via SMS.
         otp = create_otp(validated_data["email"], TelegramOTP.Purpose.RESET_PASSWORD)
-        send_sms_code(otp.phone, otp.code, otp.purpose)
+        # send_email_code instead of send_sms_code for owners
+        # TODO: implement send_email_code(otp.phone, otp.code)
+        # For now: log it (same as ESKIZ_TEST_MODE=True behavior)
+        import logging
+        logging.getLogger(__name__).info(
+            "[EMAIL OTP] email=%s code=%s", validated_data["email"], otp.code
+        )
         return otp
 
 
 class OwnerForgotPasswordConfirmSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    code = serializers.CharField(max_length=6)
-    new_password = serializers.CharField(write_only=True, min_length=8)
+    email              = serializers.EmailField()
+    code               = serializers.CharField(max_length=6)
+    new_password       = serializers.CharField(write_only=True, min_length=8)
     new_password_repeat = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
         if attrs["new_password"] != attrs["new_password_repeat"]:
             raise serializers.ValidationError({"new_password_repeat": "Passwords do not match."})
         try:
-            otp = verify_otp(attrs["email"], attrs["code"], TelegramOTP.Purpose.RESET_PASSWORD)
+            # OTP was created with email as the "phone" key
+            verify_otp(attrs["email"], attrs["code"], TelegramOTP.Purpose.RESET_PASSWORD)
         except ValueError as e:
             raise serializers.ValidationError({"code": str(e)})
-        attrs["otp_obj"] = otp
         return attrs
 
     @transaction.atomic
     def save(self, **kwargs):
-        otp = self.validated_data["otp_obj"]
         user = User.objects.get(email=self.validated_data["email"], role=User.Role.OWNER)
         user.set_password(self.validated_data["new_password"])
         user.save(update_fields=["password"])
         return user
 
 
-# ------------------------------
-# MANAGER / RECEPTIONIST (email + branch attach)
-# ------------------------------
+# ── Staff register (manager / receptionist) ───────────────────
+
 class StaffRegisterSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    first_name = serializers.CharField()
-    last_name = serializers.CharField()
-    role = serializers.ChoiceField(choices=["manager", "receptionist"])
-    branch_id = serializers.IntegerField()
-    password = serializers.CharField(write_only=True, min_length=8)
+    email           = serializers.EmailField()
+    first_name      = serializers.CharField()
+    last_name       = serializers.CharField()
+    role            = serializers.ChoiceField(choices=["manager", "receptionist"])
+    branch_id       = serializers.IntegerField()
+    password        = serializers.CharField(write_only=True, min_length=8)
     password_repeat = serializers.CharField(write_only=True)
 
     def validate_email(self, value):
@@ -228,10 +257,9 @@ class StaffRegisterSerializer(serializers.Serializer):
 
     def validate_branch_id(self, value):
         try:
-            branch = Branch.objects.get(id=value)
+            return Branch.objects.get(id=value)
         except Branch.DoesNotExist:
             raise serializers.ValidationError("Branch not found.")
-        return branch
 
     def validate(self, attrs):
         if attrs["password"] != attrs["password_repeat"]:
@@ -241,29 +269,28 @@ class StaffRegisterSerializer(serializers.Serializer):
     @transaction.atomic
     def create(self, validated_data):
         validated_data.pop("password_repeat")
-        branch = validated_data.pop("branch_id")
-        role = validated_data.pop("role")
-        user = User.objects.create_user(
+        branch = validated_data.pop("branch_id")   # already resolved to Branch instance
+        role   = validated_data.pop("role")
+        return User.objects.create_user(
             email=validated_data["email"],
             first_name=validated_data["first_name"],
             last_name=validated_data["last_name"],
             password=validated_data["password"],
             role=role,
-            branch=branch,  # branch ga attach
+            branch=branch,
             is_email_verified=True,
         )
-        return user
 
+
+# ── Staff login ───────────────────────────────────────────────
 
 class StaffLoginSerializer(serializers.Serializer):
-    email = serializers.EmailField()
+    email    = serializers.EmailField()
     password = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
         user = User.objects.filter(email=attrs["email"]).first()
-        if not user:
-            raise serializers.ValidationError("Invalid email or password.")
-        if not user.check_password(attrs["password"]):
+        if not user or not user.check_password(attrs["password"]):
             raise serializers.ValidationError("Invalid email or password.")
         if not user.is_active:
             raise serializers.ValidationError("User is inactive.")
@@ -275,59 +302,65 @@ class StaffLoginSerializer(serializers.Serializer):
         return attrs
 
 
+# ── Staff forgot password ─────────────────────────────────────
+# BUG FIXED: original called send_sms_code(otp.phone, ...) but otp was
+# created with an email string as "phone" — same crash as OwnerForgotPassword.
+
 class StaffForgotPasswordRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
     def validate_email(self, value):
-        if not User.objects.filter(email=value, role__in=[User.Role.MANAGER, User.Role.RECEPTIONIST]).exists():
+        if not User.objects.filter(
+            email=value, role__in=[User.Role.MANAGER, User.Role.RECEPTIONIST]
+        ).exists():
             raise serializers.ValidationError("No staff with this email.")
         return value
 
     def create(self, validated_data):
         otp = create_otp(validated_data["email"], TelegramOTP.Purpose.RESET_PASSWORD)
-        send_sms_code(otp.phone, otp.code, otp.purpose)
+        # Staff also uses email-based OTP — same TODO as OwnerForgotPasswordRequest
+        import logging
+        logging.getLogger(__name__).info(
+            "[EMAIL OTP] email=%s code=%s", validated_data["email"], otp.code
+        )
         return otp
 
 
 class StaffForgotPasswordConfirmSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    code = serializers.CharField(max_length=6)
-    new_password = serializers.CharField(write_only=True, min_length=8)
+    email              = serializers.EmailField()
+    code               = serializers.CharField(max_length=6)
+    new_password       = serializers.CharField(write_only=True, min_length=8)
     new_password_repeat = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
         if attrs["new_password"] != attrs["new_password_repeat"]:
             raise serializers.ValidationError({"new_password_repeat": "Passwords do not match."})
         try:
-            otp = verify_otp(attrs["email"], attrs["code"], TelegramOTP.Purpose.RESET_PASSWORD)
+            verify_otp(attrs["email"], attrs["code"], TelegramOTP.Purpose.RESET_PASSWORD)
         except ValueError as e:
             raise serializers.ValidationError({"code": str(e)})
-        attrs["otp_obj"] = otp
         return attrs
 
     @transaction.atomic
     def save(self, **kwargs):
-        otp = self.validated_data["otp_obj"]
         user = User.objects.get(email=self.validated_data["email"])
         user.set_password(self.validated_data["new_password"])
         user.save(update_fields=["password"])
         return user
 
 
-# ------------------------------
-# PROFILE UPDATE
-# ------------------------------
+# ── Profile update ────────────────────────────────────────────
+
 class ProfileUpdateSerializer(serializers.ModelSerializer):
     class Meta:
-        model = User
+        model  = User
         fields = ["first_name", "last_name", "bio", "email", "avatar", "phone"]
 
 
-# ------------------------------
-# SUPERADMIN CREATE OWNER
-# ------------------------------
+# ── Superadmin create owner ───────────────────────────────────
+
 class OwnerCreateBySuperadminSerializer(serializers.Serializer):
-    email = serializers.EmailField()
+    email    = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=8)
 
     def validate_email(self, value):

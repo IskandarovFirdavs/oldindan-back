@@ -1,23 +1,25 @@
 from rest_framework import serializers
+
+from accounts.models import User
 from .models import RestaurantBrand, Branch, BranchImage
 
 
 class BranchImageSerializer(serializers.ModelSerializer):
     class Meta:
-        model = BranchImage
+        model  = BranchImage
         fields = ["id", "image", "sort_order", "created_at"]
         read_only_fields = ["id", "created_at"]
 
 
 class RestaurantBrandListSerializer(serializers.ModelSerializer):
     class Meta:
-        model = RestaurantBrand
+        model  = RestaurantBrand
         fields = ["id", "name", "slug", "logo", "description", "created_at"]
 
 
 class RestaurantBrandCreateSerializer(serializers.ModelSerializer):
     class Meta:
-        model = RestaurantBrand
+        model  = RestaurantBrand
         fields = ["id", "name", "slug", "logo", "description"]
         read_only_fields = ["id"]
 
@@ -27,25 +29,15 @@ class RestaurantBrandCreateSerializer(serializers.ModelSerializer):
 
 
 class BranchListSerializer(serializers.ModelSerializer):
-    brand_name = serializers.CharField(source="brand.name", read_only=True)
+    brand_name  = serializers.CharField(source="brand.name", read_only=True)
     first_image = serializers.SerializerMethodField()
 
     class Meta:
-        model = Branch
+        model  = Branch
         fields = [
-            "id",
-            "brand",
-            "brand_name",
-            "name",
-            "slug",
-            "address",
-            "latitude",
-            "longitude",
-            "phone",
-            "is_active",
-            "service_fee",
-            "deposit_enabled",
-            "deposit_amount",
+            "id", "brand", "brand_name", "name", "slug",
+            "address", "latitude", "longitude", "phone",
+            "is_active", "service_fee", "deposit_enabled", "deposit_amount",
             "first_image",
         ]
 
@@ -61,74 +53,53 @@ class BranchListSerializer(serializers.ModelSerializer):
 
 class BranchDetailSerializer(serializers.ModelSerializer):
     brand_name = serializers.CharField(source="brand.name", read_only=True)
-    images = BranchImageSerializer(many=True, read_only=True)
+    images     = BranchImageSerializer(many=True, read_only=True)
 
     class Meta:
-        model = Branch
+        model  = Branch
         fields = [
-            "id",
-            "brand",
-            "brand_name",
-            "name",
-            "slug",
-            "address",
-            "latitude",
-            "longitude",
-            "phone",
-            "is_active",
-            "service_fee",
-            "deposit_enabled",
-            "deposit_amount",
-            "working_hours",
-            "booking_hours",
-            "images",
-            "created_at",
-            "updated_at",
+            "id", "brand", "brand_name", "name", "slug",
+            "address", "latitude", "longitude", "phone",
+            "is_active", "service_fee", "deposit_enabled", "deposit_amount",
+            "working_hours", "booking_hours",
+            "images", "created_at", "updated_at",
         ]
 
 
 class BranchCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Branch
+        model  = Branch
         fields = [
-            "id",
-            "brand",
-            "name",
-            "slug",
-            "address",
-            "latitude",
-            "longitude",
-            "phone",
-            "is_active",
-            "service_fee",
-            "deposit_enabled",
-            "deposit_amount",
-            "working_hours",
-            "booking_hours",
+            "id", "brand", "name", "slug", "address",
+            "latitude", "longitude", "phone", "is_active",
+            "service_fee", "deposit_enabled", "deposit_amount",
+            "working_hours", "booking_hours",
         ]
         read_only_fields = ["id"]
 
     def validate_brand(self, value):
         user = self.context["request"].user
-        if user.role == "superadmin":
+        # FIXED: use User.Role.SUPERADMIN instead of "superadmin" string
+        if user.role == User.Role.SUPERADMIN:
             return value
-
         if value.owner_id != user.id:
-            raise serializers.ValidationError("Siz faqat o'zingizga tegishli brandga branch qo'sha olasiz")
+            raise serializers.ValidationError(
+                "You can only add branches to your own brand."
+            )
         return value
 
 
 class BranchImageCreateSerializer(serializers.ModelSerializer):
     class Meta:
-        model = BranchImage
+        model  = BranchImage
         fields = ["id", "branch", "image", "sort_order"]
         read_only_fields = ["id"]
 
     def validate_branch(self, value):
         user = self.context["request"].user
-        if user.role == "superadmin":
+        # FIXED: use User.Role.SUPERADMIN instead of "superadmin" string
+        if user.role == User.Role.SUPERADMIN:
             return value
-
         if value.brand.owner_id != user.id:
-            raise serializers.ValidationError("Bu branch sizga tegishli emas")
+            raise serializers.ValidationError("This branch does not belong to you.")
         return value

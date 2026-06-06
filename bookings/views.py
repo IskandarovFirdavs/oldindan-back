@@ -1,7 +1,10 @@
 import logging
+from datetime import date as date_type
 
-from django.utils.dateparse import parse_datetime
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime, parse_date
 from rest_framework import generics, permissions, status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -18,26 +21,52 @@ from .serializers import (
     ConsumerBookingCreateSerializer,
     PartnerManualBookingCreateSerializer,
 )
-from .services import ACTIVE_BOOKING_STATUSES, cancel_booking, update_booking_status
+from .services import (
+    ACTIVE_BOOKING_STATUSES,
+    cancel_booking,
+    get_available_slots,
+    update_booking_status,
+)
 
 logger = logging.getLogger(__name__)
 
 
-# ────────────────────────────────────────────────────────────
-# CONSUMER
-# ────────────────────────────────────────────────────────────
+# ── Pagination ───────────────────────────────────────────────
+
+class BookingPagination(PageNumberPagination):
+    page_size            = 20
+    page_size_query_param = "page_size"
+    max_page_size        = 100
+
+
+# ── Consumer ─────────────────────────────────────────────────
 
 class MyBookingListView(generics.ListAPIView):
     serializer_class   = BookingListSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class   = BookingPagination
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Booking.objects.none()
-        return (
+
+        qs = (
             Booking.objects.filter(user=self.request.user)
             .select_related("user", "branch", "floor", "zone", "table")
         )
+
+        # Filter: ?upcoming=true shows only future active bookings
+        upcoming = self.request.query_params.get("upcoming")
+        if upcoming == "true":
+            qs = qs.filter(
+                booking_start__gte=timezone.now(),
+                status__in=["pending", "confirmed"],
+            )
+        # Filter: ?past=true shows only completed/canceled/no_show
+        elif self.request.query_params.get("past") == "true":
+            qs = qs.filter(status__in=["completed", "canceled", "no_show"])
+
+        return qs
 
 
 class MyBookingDetailView(generics.RetrieveAPIView):
@@ -50,7 +79,8 @@ class MyBookingDetailView(generics.RetrieveAPIView):
         return (
             Booking.objects.filter(user=self.request.user)
             .select_related("user", "branch", "floor", "zone", "table")
-            .prefetch_related("status_logs")
+            # prefetch status_logs AND the user who changed them — prevents N+1
+            .prefetch_related("status_logs__changed_by")
         )
 
 
@@ -65,13 +95,13 @@ class ConsumerBookingCreateView(generics.CreateAPIView):
         try:
             booking = s.save()
             return Response(
-                {"detail": "Bron muvaffaqiyatli yaratildi.", "booking_id": booking.id},
+                {"detail": "Booking created successfully.", "booking_id": booking.id},
                 status=status.HTTP_201_CREATED,
             )
         except Exception:
-            logger.exception("ConsumerBookingCreateView xatosi")
+            logger.exception("ConsumerBookingCreateView error")
             return Response(
-                {"detail": "Serverda kutilmagan xatolik yuz berdi."},
+                {"detail": "An unexpected server error occurred."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -82,7 +112,7 @@ class MyBookingCancelView(APIView):
     def post(self, request, pk):
         booking = Booking.objects.filter(user=request.user, pk=pk).first()
         if not booking:
-            return Response({"detail": "Bron topilmadi."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
         s = BookingCancelSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         try:
@@ -91,14 +121,73 @@ class MyBookingCancelView(APIView):
                 changed_by=request.user,
                 note=s.validated_data.get("note", ""),
             )
-            return Response({"detail": "Bron bekor qilindi."})
+            return Response({"detail": "Booking cancelled."})
         except ValueError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-# ────────────────────────────────────────────────────────────
-# PARTNER — helpers
-# ────────────────────────────────────────────────────────────
+# ── Available slots (medium priority — high UX value) ────────
+
+class AvailableSlotsView(APIView):
+    """
+    GET /api/bookings/available-slots/
+        ?branch_id=1&table_id=4&date=2026-06-15&duration=60
+
+    Returns a list of available start times for a given table and date.
+    Consumer-facing, no auth required.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        branch_id  = request.query_params.get("branch_id")
+        table_id   = request.query_params.get("table_id")
+        date_str   = request.query_params.get("date")
+        duration   = request.query_params.get("duration", 60)
+
+        if not all([branch_id, table_id, date_str]):
+            return Response(
+                {"detail": "branch_id, table_id, and date are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        target_date = parse_date(date_str)
+        if not target_date:
+            return Response(
+                {"detail": "Invalid date format. Use YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            duration_minutes = int(duration)
+            if duration_minutes < 30 or duration_minutes > 240:
+                raise ValueError()
+        except (ValueError, TypeError):
+            return Response(
+                {"detail": "duration must be an integer between 30 and 240."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        table = (
+            Table.objects.filter(id=table_id, branch_id=branch_id, is_active=True)
+            .select_related("branch")
+            .first()
+        )
+        if not table:
+            return Response(
+                {"detail": "Table not found or not active."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        slots = get_available_slots(
+            table=table,
+            branch=table.branch,
+            date=target_date,
+            duration_minutes=duration_minutes,
+        )
+        return Response({"date": date_str, "duration_minutes": duration_minutes, "slots": slots})
+
+
+# ── Partner helpers ───────────────────────────────────────────
 
 def _partner_booking_qs(user):
     qs = Booking.objects.select_related("user", "branch__brand", "floor", "zone", "table")
@@ -110,13 +199,12 @@ def _partner_booking_qs(user):
     return qs.filter(branch=user.branch)
 
 
-# ────────────────────────────────────────────────────────────
-# PARTNER — bookings
-# ────────────────────────────────────────────────────────────
+# ── Partner bookings ──────────────────────────────────────────
 
 class PartnerBookingListView(generics.ListAPIView):
     serializer_class   = BookingListSerializer
     permission_classes = [permissions.IsAuthenticated, IsPartnerBookingViewer]
+    pagination_class   = BookingPagination
 
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
@@ -124,8 +212,7 @@ class PartnerBookingListView(generics.ListAPIView):
 
         user   = self.request.user
         params = self.request.query_params
-
-        qs = _partner_booking_qs(user)
+        qs     = _partner_booking_qs(user)
 
         branch_id    = params.get("branch_id")
         status_param = params.get("status")
@@ -151,7 +238,10 @@ class PartnerBookingDetailView(generics.RetrieveAPIView):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Booking.objects.none()
-        return _partner_booking_qs(self.request.user).prefetch_related("status_logs")
+        return (
+            _partner_booking_qs(self.request.user)
+            .prefetch_related("status_logs__changed_by")
+        )
 
 
 class PartnerManualBookingCreateView(generics.CreateAPIView):
@@ -165,13 +255,13 @@ class PartnerManualBookingCreateView(generics.CreateAPIView):
         try:
             booking = s.save()
             return Response(
-                {"detail": "Manual bron yaratildi.", "booking_id": booking.id},
+                {"detail": "Manual booking created.", "booking_id": booking.id},
                 status=status.HTTP_201_CREATED,
             )
         except Exception:
-            logger.exception("PartnerManualBookingCreateView xatosi")
+            logger.exception("PartnerManualBookingCreateView error")
             return Response(
-                {"detail": "Serverda kutilmagan xatolik yuz berdi."},
+                {"detail": "An unexpected server error occurred."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -184,9 +274,9 @@ class PartnerBookingStatusUpdateView(APIView):
             Booking.objects.select_related("branch__brand").filter(pk=pk).first()
         )
         if not booking:
-            return Response({"detail": "Bron topilmadi."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"detail": "Booking not found."}, status=status.HTTP_404_NOT_FOUND)
         if not can_manage_branch_bookings(request.user, booking.branch):
-            return Response({"detail": "Ruxsat yo'q."}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
 
         s = BookingStatusUpdateSerializer(data=request.data)
         s.is_valid(raise_exception=True)
@@ -197,7 +287,7 @@ class PartnerBookingStatusUpdateView(APIView):
                 changed_by=request.user,
                 note=s.validated_data.get("note", ""),
             )
-            return Response({"detail": "Status yangilandi."})
+            return Response({"detail": "Status updated."})
         except ValueError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -214,7 +304,7 @@ class PartnerOccupiedTablesView(APIView):
 
         if not all([branch_id, booking_start, booking_end]):
             return Response(
-                {"detail": "branch_id, booking_start, booking_end majburiy."},
+                {"detail": "branch_id, booking_start, and booking_end are required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -222,7 +312,7 @@ class PartnerOccupiedTablesView(APIView):
         end_dt   = parse_datetime(booking_end)
         if not start_dt or not end_dt:
             return Response(
-                {"detail": "Noto'g'ri datetime formati."},
+                {"detail": "Invalid datetime format."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -236,7 +326,7 @@ class PartnerOccupiedTablesView(APIView):
 
         first_table = tables_qs.first()
         if first_table and not can_manage_branch_bookings(request.user, first_table.branch):
-            return Response({"detail": "Ruxsat yo'q."}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
 
         booked_map = {
             b.table_id: b
@@ -250,10 +340,10 @@ class PartnerOccupiedTablesView(APIView):
 
         data = [
             {
-                "table_id":   t.id,
+                "table_id":    t.id,
                 "is_occupied": t.id in booked_map,
-                "booking_id":  booked_map[t.id].id if t.id in booked_map else None,
-                "status":      booked_map[t.id].status if t.id in booked_map else None,
+                "booking_id":  booked_map[t.id].id     if t.id in booked_map else None,
+                "status":      booked_map[t.id].status  if t.id in booked_map else None,
             }
             for t in tables_qs
         ]

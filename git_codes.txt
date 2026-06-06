@@ -1,3 +1,11 @@
+git init
+
+git add .
+
+git commit -m "commit"
+
+git push origin dev
+
 # Hozirgi holatni saqla
 git status
 

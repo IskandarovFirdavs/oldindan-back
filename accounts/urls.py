@@ -1,7 +1,7 @@
 from django.urls import path
 from .views import (
     ConsumerRequestRegisterOTPView, ConsumerRegisterView, ConsumerLoginView,
-    ConsumerForgotPasswordRequestView, ConsumerForgotPasswordConfirmView,
+    ConsumerForgotPasswordRequestView, ConsumerForgotPasswordConfirmView, LogoutView,
     OwnerRegisterView, OwnerLoginView, OwnerForgotPasswordRequestView, OwnerForgotPasswordConfirmView,
     StaffRegisterView, StaffLoginView, StaffForgotPasswordRequestView, StaffForgotPasswordConfirmView,
     MeView, OwnerCreateBySuperadminView,
@@ -32,4 +32,6 @@ urlpatterns = [
 
     # superadmin
     path("create-owner/", OwnerCreateBySuperadminView.as_view()),
+    # logout
+    path("logout/", LogoutView.as_view()),
 ]

@@ -165,3 +165,18 @@ class OwnerCreateBySuperadminView(APIView):
         s.is_valid(raise_exception=True)
         user = s.save()
         return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
+    
+
+
+class LogoutView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    def post(self, request):
+        try:
+            refresh_token = request.data["refresh"]
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+            return Response({"detail": "Logged out successfully."}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"detail": "Invalid token."}, status=status.HTTP_400_BAD_REQUEST)
+        
+
